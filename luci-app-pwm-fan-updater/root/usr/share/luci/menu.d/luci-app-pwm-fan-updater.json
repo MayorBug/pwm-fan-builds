@@ -1,0 +1,13 @@
+{
+	"admin/system/pwm-fan/update": {
+		"title": "Update",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "system/pwm-fan/update"
+		},
+		"depends": {
+			"acl": [ "luci-app-pwm-fan-updater" ]
+		}
+	}
+}

@@ -1,0 +1,35 @@
+#!/usr/bin/env ucode
+// SPDX-License-Identifier: GPL-2.0-only
+
+'use strict';
+
+import { popen } from 'fs';
+
+function helper(action) {
+	let pipe = popen('/usr/libexec/pwm-fan-update ' + action, 'r');
+
+	if (!pipe)
+		return { success: false, error: 'helper_unavailable' };
+	let output = pipe.read('all');
+	let result = pipe.close();
+	try {
+		let response = json(trim(output));
+		if (result != 0)
+			response.success = false;
+		return response;
+	}
+	catch (e) {
+		return { success: false, error: 'invalid_response' };
+	}
+}
+
+return {
+	'pwm.fan.update': {
+		check: {
+			call: function() { return helper('check'); }
+		},
+		install: {
+			call: function() { return helper('install'); }
+		}
+	}
+};

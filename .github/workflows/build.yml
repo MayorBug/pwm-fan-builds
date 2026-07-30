@@ -1,0 +1,209 @@
+name: Build and publish community APKs
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_ref:
+        description: OpenWrt branch, tag, or commit
+        required: true
+        default: main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pwm-fan-community-release
+  cancel-in-progress: false
+
+env:
+  LUCI_REPOSITORY: https://github.com/MayorBug/luci
+  LUCI_BRANCH: luci-app-pwm-fan
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out delivery repository
+        uses: actions/checkout@v7
+        with:
+          path: delivery
+
+      - name: Check out OpenWrt
+        uses: actions/checkout@v7
+        with:
+          repository: openwrt/openwrt
+          ref: ${{ inputs.openwrt_ref }}
+          path: openwrt
+
+      - name: Resolve LuCI source
+        run: |
+          set -eu
+          git clone --depth=1 --single-branch --branch "$LUCI_BRANCH" \
+            "$LUCI_REPOSITORY" luci-source
+          git -C luci-source rev-parse HEAD > source.commit
+          git -C openwrt rev-parse HEAD > openwrt.commit
+
+      - name: Resolve package version
+        run: |
+          set -eu
+          app_makefile=luci-source/applications/luci-app-pwm-fan/Makefile
+          controller_makefile=luci-source/applications/pwm-fan-control/Makefile
+          updater_makefile=delivery/luci-app-pwm-fan-updater/Makefile
+          version=$(sed -n 's/^PKG_VERSION:=//p' "$app_makefile")
+          release=$(sed -n 's/^PKG_RELEASE:=//p' "$app_makefile")
+          case "$version" in
+            ''|*[!0-9A-Za-z._+~-]*)
+              echo "Invalid source package version: $version" >&2
+              exit 1
+              ;;
+          esac
+          case "$release" in
+            ''|*[!0-9]*)
+              echo "Invalid source package release: $release" >&2
+              exit 1
+              ;;
+          esac
+          test "$(sed -n 's/^PKG_VERSION:=//p' "$controller_makefile")" = "$version"
+          test "$(sed -n 's/^PKG_RELEASE:=//p' "$controller_makefile")" = "$release"
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$version/" "$updater_makefile"
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$release/" "$updater_makefile"
+          printf '%s\n' \
+            "PACKAGE_VERSION=$version" \
+            "PACKAGE_RELEASE=$release" \
+            "RELEASE_TAG=v${version}-r${release}" >> "$GITHUB_ENV"
+
+      - name: Prepare feeds and packages
+        run: |
+          set -eu
+          cd openwrt
+          ./scripts/feeds update -a
+          rm -rf feeds/luci/applications/pwm-fan-control
+          rm -rf feeds/luci/applications/luci-app-pwm-fan
+          cp -a ../luci-source/applications/pwm-fan-control \
+            feeds/luci/applications/pwm-fan-control
+          cp -a ../luci-source/applications/luci-app-pwm-fan \
+            feeds/luci/applications/luci-app-pwm-fan
+          ./scripts/feeds update -i luci
+          ./scripts/feeds install -a
+          cp -a ../delivery/luci-app-pwm-fan-updater \
+            package/luci-app-pwm-fan-updater
+          printf '%s\n' \
+            'CONFIG_PACKAGE_pwm-fan-control=m' \
+            'CONFIG_PACKAGE_luci-app-pwm-fan=m' \
+            'CONFIG_PACKAGE_luci-app-pwm-fan-updater=m' >> .config
+          make defconfig
+
+      - name: Run focused source tests
+        run: |
+          set -eu
+          luci-source/applications/luci-app-pwm-fan/tests/run_tests.sh
+          sh -n delivery/install.sh
+          sh -n delivery/luci-app-pwm-fan-updater/root/usr/libexec/pwm-fan-update
+          node --check delivery/luci-app-pwm-fan-updater/htdocs/luci-static/resources/view/system/pwm-fan/update.js
+          grep -Fq '$(1)/www' delivery/luci-app-pwm-fan-updater/Makefile
+
+      - name: Build OpenWrt host tools
+        run: |
+          set -eu
+          make -C openwrt -j"$(nproc)" tools/install || \
+            make -C openwrt -j1 tools/install V=s
+
+      - name: Build OpenWrt target prerequisites
+        run: |
+          set -eu
+          make -C openwrt -j"$(nproc)" toolchain/install || \
+            make -C openwrt -j1 toolchain/install V=s
+          make -C openwrt -j"$(nproc)" target/linux/compile || \
+            make -C openwrt -j1 target/linux/compile V=s
+
+      - name: Build packages
+        run: |
+          set -eu
+          make -C openwrt -j"$(nproc)" \
+            package/feeds/luci/pwm-fan-control/compile || \
+            make -C openwrt -j1 \
+              package/feeds/luci/pwm-fan-control/compile V=s
+          make -C openwrt -j"$(nproc)" \
+            package/feeds/luci/luci-app-pwm-fan/compile || \
+            make -C openwrt -j1 \
+              package/feeds/luci/luci-app-pwm-fan/compile V=s
+          make -C openwrt -j"$(nproc)" \
+            package/luci-app-pwm-fan-updater/compile || \
+            make -C openwrt -j1 \
+              package/luci-app-pwm-fan-updater/compile V=s
+          test -n "$(find openwrt/build_dir -type f \
+            -path '*/luci-app-pwm-fan-updater/www/luci-static/resources/view/system/pwm-fan/update.js' \
+            -print -quit)"
+
+      - name: Assemble release
+        run: |
+          set -eu
+          mkdir -p release
+          controller=$(find openwrt/bin/packages -type f \
+            -name 'pwm-fan-control-*.apk' | head -n 1)
+          core=$(find openwrt/bin/packages -type f -name 'luci-app-pwm-fan-*.apk' \
+            ! -name '*-updater-*' | head -n 1)
+          updater=$(find openwrt/bin/packages -type f \
+            -name 'luci-app-pwm-fan-updater-*.apk' | head -n 1)
+          test -n "$controller"
+          test -n "$core"
+          test -n "$updater"
+          cp "$controller" release/pwm-fan-control.apk
+          cp "$core" release/luci-app-pwm-fan.apk
+          cp "$updater" release/luci-app-pwm-fan-updater.apk
+          (cd release && sha256sum *.apk > sha256sums)
+          source_commit=$(cat source.commit)
+          openwrt_commit=$(cat openwrt.commit)
+          controller_sha=$(sha256sum release/pwm-fan-control.apk | cut -d' ' -f1)
+          core_sha=$(sha256sum release/luci-app-pwm-fan.apk | cut -d' ' -f1)
+          updater_sha=$(sha256sum release/luci-app-pwm-fan-updater.apk | cut -d' ' -f1)
+          controller_size=$(wc -c < release/pwm-fan-control.apk)
+          core_size=$(wc -c < release/luci-app-pwm-fan.apk)
+          updater_size=$(wc -c < release/luci-app-pwm-fan-updater.apk)
+          base="https://github.com/MayorBug/pwm-fan-builds/releases/download/$RELEASE_TAG"
+          jq -n \
+            --arg version "$PACKAGE_VERSION" \
+            --arg release "$PACKAGE_RELEASE" \
+            --arg published_at "$(date -u +%FT%TZ)" \
+            --arg source_repo "$LUCI_REPOSITORY" \
+            --arg source_ref "$LUCI_BRANCH" \
+            --arg source_commit "$source_commit" \
+            --arg openwrt_ref "${{ inputs.openwrt_ref }}" \
+            --arg openwrt_commit "$openwrt_commit" \
+            --arg notes "https://github.com/MayorBug/pwm-fan-builds/releases/tag/$RELEASE_TAG" \
+            --arg controller_url "$base/pwm-fan-control.apk" \
+            --arg controller_sha "$controller_sha" \
+            --argjson controller_size "$controller_size" \
+            --arg core_url "$base/luci-app-pwm-fan.apk" \
+            --arg core_sha "$core_sha" \
+            --argjson core_size "$core_size" \
+            --arg updater_url "$base/luci-app-pwm-fan-updater.apk" \
+            --arg updater_sha "$updater_sha" \
+            --argjson updater_size "$updater_size" \
+            '{schema:1, channel:"stable", version:$version, release:$release,
+              published_at:$published_at,
+              source:{repository:$source_repo, ref:$source_ref, commit:$source_commit},
+              openwrt:{ref:$openwrt_ref, commit:$openwrt_commit},
+              release_notes_url:$notes,
+              packages:{
+                controller:{url:$controller_url, sha256:$controller_sha, size:$controller_size},
+                core:{url:$core_url, sha256:$core_sha, size:$core_size},
+                updater:{url:$updater_url, sha256:$updater_sha, size:$updater_size}
+              }}' > release/latest.json
+          cp delivery/install.sh release/install.sh
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            >/dev/null 2>&1 && {
+              echo "Release already exists: $RELEASE_TAG" >&2
+              exit 1
+            }
+          gh release create "$RELEASE_TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "PWM Fan Control ${RELEASE_TAG#v}" \
+            --notes "Community APK build from LuCI commit $(cat source.commit)." \
+            --latest

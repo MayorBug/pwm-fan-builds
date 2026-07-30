@@ -1,0 +1,153 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -eu
+
+MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/latest.json
+RELEASE_PREFIX=https://github.com/MayorBug/pwm-fan-builds/releases/download/
+HTTP_CLIENT=${PWM_FAN_UPDATE_HTTP_CLIENT:-uclient-fetch}
+JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
+WORK=
+LOCK=/tmp/pwm-fan-update.lock
+
+cleanup()
+{
+	[ -z "$WORK" ] || rm -rf "$WORK"
+	rmdir "$LOCK" 2>/dev/null || true
+}
+
+json_error()
+{
+	printf '{"success":false,"error":"%s"}\n' "$1"
+	exit 1
+}
+
+field()
+{
+	"$JSONFILTER" -i "$WORK/latest.json" -e "$1" 2>/dev/null
+}
+
+valid_version()
+{
+	case $1 in ''|*[!0-9A-Za-z.+_-]*) return 1 ;; *) return 0 ;; esac
+}
+
+valid_url()
+{
+	case $1 in "$RELEASE_PREFIX"*) return 0 ;; *) return 1 ;; esac
+}
+
+valid_sha()
+{
+	[ "${#1}" -eq 64 ] || return 1
+	case $1 in *[!0-9a-f]*) return 1 ;; *) return 0 ;; esac
+}
+
+load_manifest()
+{
+	WORK=$(mktemp -d /tmp/pwm-fan-update.XXXXXX) ||
+		json_error temporary_directory_failed
+	"$HTTP_CLIENT" -q -T 20 -O "$WORK/latest.json" "$MANIFEST_URL" ||
+		json_error manifest_download_failed
+
+	SCHEMA=$(field '@.schema') || json_error manifest_invalid
+	CHANNEL=$(field '@.channel') || json_error manifest_invalid
+	VERSION=$(field '@.version') || json_error manifest_invalid
+	RELEASE=$(field '@.release') || json_error manifest_invalid
+	NOTES=$(field '@.release_notes_url') || json_error manifest_invalid
+	SOURCE_COMMIT=$(field '@.source.commit') || json_error manifest_invalid
+	CONTROLLER_URL=$(field '@.packages.controller.url') || json_error manifest_invalid
+	CONTROLLER_SHA=$(field '@.packages.controller.sha256') || json_error manifest_invalid
+	CONTROLLER_SIZE=$(field '@.packages.controller.size') || json_error manifest_invalid
+	CORE_URL=$(field '@.packages.core.url') || json_error manifest_invalid
+	CORE_SHA=$(field '@.packages.core.sha256') || json_error manifest_invalid
+	CORE_SIZE=$(field '@.packages.core.size') || json_error manifest_invalid
+	UPDATER_URL=$(field '@.packages.updater.url') || json_error manifest_invalid
+	UPDATER_SHA=$(field '@.packages.updater.sha256') || json_error manifest_invalid
+	UPDATER_SIZE=$(field '@.packages.updater.size') || json_error manifest_invalid
+
+	[ "$SCHEMA" = 1 ] && [ "$CHANNEL" = stable ] ||
+		json_error manifest_invalid
+	valid_version "$VERSION" && valid_version "$RELEASE" ||
+		json_error manifest_invalid
+	valid_url "$CONTROLLER_URL" && valid_url "$CORE_URL" &&
+		valid_url "$UPDATER_URL" ||
+		json_error manifest_origin_rejected
+	case $NOTES in
+		https://github.com/MayorBug/pwm-fan-builds/releases/tag/*) ;;
+		*) json_error manifest_origin_rejected ;;
+	esac
+	[ "${#SOURCE_COMMIT}" -eq 40 ] ||
+		json_error manifest_invalid
+	case $SOURCE_COMMIT in *[!0-9a-f]*) json_error manifest_invalid ;; esac
+	valid_sha "$CONTROLLER_SHA" && valid_sha "$CORE_SHA" &&
+		valid_sha "$UPDATER_SHA" ||
+		json_error manifest_invalid
+	case $CONTROLLER_SIZE:$CORE_SIZE:$UPDATER_SIZE in
+		*[!0-9:]*|*::*|:*|*:) json_error manifest_invalid ;;
+	esac
+	[ "$CONTROLLER_SIZE" -le 2097152 ] && [ "$CORE_SIZE" -le 2097152 ] &&
+		[ "$UPDATER_SIZE" -le 2097152 ] ||
+		json_error package_too_large
+}
+
+installed_version()
+{
+	local version
+	version=$(apk list --installed luci-app-pwm-fan 2>/dev/null |
+		sed -n '1s/^luci-app-pwm-fan-\([^ ]*\).*/\1/p')
+	if [ -z "$version" ]; then
+		version=$(apk info -v luci-app-pwm-fan 2>/dev/null |
+			sed -n '1s/^luci-app-pwm-fan-\([^ ]*\).*/\1/p')
+	fi
+	printf '%s\n' "$version"
+}
+
+check_update()
+{
+	load_manifest
+	INSTALLED=$(installed_version)
+	valid_version "${INSTALLED:-not-installed}" || INSTALLED=unknown
+	printf '{"success":true,"installed":"%s","version":"%s","release":"%s",' \
+		"${INSTALLED:-not-installed}" "$VERSION" "$RELEASE"
+	printf '"source_commit":"%s","release_notes_url":"%s",' \
+		"$SOURCE_COMMIT" "$NOTES"
+	printf '"update_available":%s}\n' \
+		"$([ "$INSTALLED" != "$VERSION-r$RELEASE" ] && printf true || printf false)"
+}
+
+fetch_package()
+{
+	local name="$1" url="$2" sha="$3" size="$4"
+
+	"$HTTP_CLIENT" -q -T 30 -O "$WORK/$name" "$url" ||
+		json_error package_download_failed
+	[ "$(wc -c < "$WORK/$name")" -eq "$size" ] ||
+		json_error package_size_mismatch
+	printf '%s  %s\n' "$sha" "$WORK/$name" | sha256sum -c - >/dev/null ||
+		json_error checksum_failed
+}
+
+install_update()
+{
+	mkdir "$LOCK" 2>/dev/null || json_error update_in_progress
+	trap cleanup EXIT INT TERM
+	load_manifest
+	df -k /tmp | awk 'NR == 2 { exit ($4 < 4096) }' ||
+		json_error insufficient_space
+	fetch_package controller.apk "$CONTROLLER_URL" "$CONTROLLER_SHA" \
+		"$CONTROLLER_SIZE"
+	fetch_package core.apk "$CORE_URL" "$CORE_SHA" "$CORE_SIZE"
+	fetch_package updater.apk "$UPDATER_URL" "$UPDATER_SHA" "$UPDATER_SIZE"
+	apk add --allow-untrusted "$WORK/controller.apk" "$WORK/core.apk" \
+		"$WORK/updater.apk" >/dev/null ||
+		json_error install_failed
+	printf '{"success":true,"version":"%s","release":"%s"}\n' \
+		"$VERSION" "$RELEASE"
+}
+
+case ${1:-} in
+	check) trap cleanup EXIT INT TERM; check_update ;;
+	install) install_update ;;
+	*) exit 2 ;;
+esac
