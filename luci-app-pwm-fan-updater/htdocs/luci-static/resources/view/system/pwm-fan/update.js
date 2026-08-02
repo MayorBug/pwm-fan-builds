@@ -62,46 +62,49 @@ return view.extend({
 				E('strong', {}, [ _('Source commit') ]),
 				E('div', {}, [ status.source_commit ])
 			]));
-			if (status.update_available)
-				body.appendChild(E('button', {
-					'class': 'btn cbi-button-positive',
-					'type': 'button',
-					'click': function(ev) {
-						var button = ev.currentTarget;
-						ui.showModal(_('Install community update?'), [
-							E('p', {}, [
-								_('The APKs will be downloaded over HTTPS and checked with SHA-256 before installation.')
-							]),
-							E('div', { 'class': 'right' }, [
-								E('button', {
-									'class': 'btn',
-									'click': ui.hideModal
-								}, [ _('Cancel') ]),
-								' ',
-								E('button', {
-									'class': 'btn cbi-button-positive',
-									'click': function() {
-										button.disabled = true;
-										return callInstall().then(function(result) {
-											if (!result.success)
-												throw new Error(errorText(result.error));
-											ui.hideModal();
-											ui.addNotification(null, E('p', {}, [
-												_('Update installed. Reload LuCI to use the new files.')
-											]), 'info');
-										}).catch(function(error) {
-											ui.addNotification(null, E('p', {}, [
-												error.message
-											]), 'error');
-										}).finally(function() {
-											button.disabled = false;
-										});
-									}
-								}, [ _('Install update') ])
-							])
-						]);
-					}
-				}, [ _('Install latest build') ]));
+			var sameVersion = status.same_version === true;
+			var action = E('button', {
+				'class': 'btn ' + (status.update_available ? 'cbi-button-positive' : 'cbi-button-neutral'),
+				'type': 'button',
+				'disabled': !status.update_available && !sameVersion ? 'disabled' : null,
+				'click': function(ev) {
+					var button = ev.currentTarget;
+					var reinstall = sameVersion;
+					ui.showModal(reinstall ? _('Reinstall current build?') : _('Install new build?'), [
+						E('p', {}, [ reinstall
+							? _('The installed and latest builds are the same. Reinstall this build?')
+							: _('The latest build will be downloaded and installed.')
+						]),
+						E('div', { 'class': 'right' }, [
+							E('button', {
+								'class': 'btn',
+								'click': ui.hideModal
+							}, [ _('Cancel') ]),
+							' ',
+							E('button', {
+								'class': 'btn cbi-button-positive',
+								'click': function() {
+									button.disabled = true;
+									return callInstall().then(function(result) {
+										if (!result.success)
+											throw new Error(errorText(result.error));
+										ui.hideModal();
+										ui.addNotification(null, E('p', {}, [ reinstall
+											? _('Build reinstalled. Reload LuCI to use the refreshed files.')
+											: _('New build installed. Reload LuCI to use the new files.')
+										]), 'info');
+									}).catch(function(error) {
+										ui.addNotification(null, E('p', {}, [ error.message ]), 'error');
+									}).finally(function() {
+										button.disabled = false;
+									});
+								}
+							}, [ reinstall ? _('Reinstall build') : _('Install build') ])
+						])
+					]);
+				}
+			}, [ status.update_available ? _('Download new build') : _('Up to date') ]);
+			body.appendChild(action);
 		}
 
 		return E([], [

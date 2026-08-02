@@ -7,6 +7,7 @@ MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download
 RELEASE_PREFIX=https://github.com/MayorBug/pwm-fan-builds/releases/download/
 HTTP_CLIENT=${PWM_FAN_UPDATE_HTTP_CLIENT:-uclient-fetch}
 JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
+APK=${PWM_FAN_UPDATE_APK:-apk}
 WORK=
 LOCK=/tmp/pwm-fan-update.lock
 
@@ -94,10 +95,10 @@ load_manifest()
 installed_version()
 {
 	local version
-	version=$(apk list --installed luci-app-pwm-fan 2>/dev/null |
+	version=$("$APK" list --installed luci-app-pwm-fan 2>/dev/null |
 		sed -n '1s/^luci-app-pwm-fan-\([^ ]*\).*/\1/p')
 	if [ -z "$version" ]; then
-		version=$(apk info -v luci-app-pwm-fan 2>/dev/null |
+		version=$("$APK" info -v luci-app-pwm-fan 2>/dev/null |
 			sed -n '1s/^luci-app-pwm-fan-\([^ ]*\).*/\1/p')
 	fi
 	printf '%s\n' "$version"
@@ -105,15 +106,31 @@ installed_version()
 
 check_update()
 {
+	local latest relation=unknown update_available=false same_version=false up_to_date=false
 	load_manifest
 	INSTALLED=$(installed_version)
 	valid_version "${INSTALLED:-not-installed}" || INSTALLED=unknown
+	latest=$VERSION-r$RELEASE
+	if [ "$INSTALLED" = "$latest" ]; then
+		relation='='; same_version=true; up_to_date=true
+	elif [ "$INSTALLED" = unknown ] || [ "$INSTALLED" = not-installed ] ||
+		[ -z "$INSTALLED" ]; then
+		update_available=true
+	else
+		relation=$("$APK" version -t "$INSTALLED" "$latest" 2>/dev/null || printf unknown)
+		case $relation in
+			'<') update_available=true ;;
+			'=') same_version=true; up_to_date=true ;;
+			'>') up_to_date=true ;;
+			*) relation=unknown; update_available=true ;;
+		esac
+	fi
 	printf '{"success":true,"installed":"%s","version":"%s","release":"%s",' \
 		"${INSTALLED:-not-installed}" "$VERSION" "$RELEASE"
 	printf '"source_commit":"%s","release_notes_url":"%s",' \
 		"$SOURCE_COMMIT" "$NOTES"
-	printf '"update_available":%s}\n' \
-		"$([ "$INSTALLED" != "$VERSION-r$RELEASE" ] && printf true || printf false)"
+	printf '"version_relation":"%s","update_available":%s,' "$relation" "$update_available"
+	printf '"same_version":%s,"up_to_date":%s}\n' "$same_version" "$up_to_date"
 }
 
 fetch_package()
@@ -139,7 +156,7 @@ install_update()
 		"$CONTROLLER_SIZE"
 	fetch_package core.apk "$CORE_URL" "$CORE_SHA" "$CORE_SIZE"
 	fetch_package updater.apk "$UPDATER_URL" "$UPDATER_SHA" "$UPDATER_SIZE"
-	apk add --allow-untrusted "$WORK/controller.apk" "$WORK/core.apk" \
+	"$APK" add --allow-untrusted --force-reinstall "$WORK/controller.apk" "$WORK/core.apk" \
 		"$WORK/updater.apk" >/dev/null ||
 		json_error install_failed
 	printf '{"success":true,"version":"%s","release":"%s"}\n' \

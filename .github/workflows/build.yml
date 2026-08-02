@@ -100,6 +100,7 @@ jobs:
           sh -n delivery/install.sh
           sh -n delivery/luci-app-pwm-fan-updater/root/usr/libexec/pwm-fan-update
           node --check delivery/luci-app-pwm-fan-updater/htdocs/luci-static/resources/view/system/pwm-fan/update.js
+          delivery/tests/test_updater.sh
           grep -Fq '$(1)/www' delivery/luci-app-pwm-fan-updater/Makefile
 
       - name: Build OpenWrt host tools

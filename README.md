@@ -13,6 +13,10 @@ resolved LuCI and OpenWrt commit IDs and publishes:
 - `luci-app-pwm-fan-updater.apk`
 - `sha256sums`
 - `latest.json`
+
+The Update page always shows its primary action. A newer release is offered as
+**Download new build**. When the installed build matches the release, it shows
+**Up to date** and asks for confirmation before reinstalling the same build.
 - `install.sh`
 
 ## Installation:
