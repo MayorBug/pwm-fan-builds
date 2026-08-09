@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 set -eu
+umask 077
 
 MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/latest.json
 RELEASE_PREFIX=https://github.com/MayorBug/pwm-fan-builds/releases/download/
@@ -10,17 +11,53 @@ JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
 APK=${PWM_FAN_UPDATE_APK:-apk}
 WORK=
 LOCK=/tmp/pwm-fan-update.lock
+STATUS=${PWM_FAN_UPDATE_STATUS:-/tmp/pwm-fan-update-status.json}
+ASYNC=false
+LOCK_HELD=false
+STATUS_PHASE=idle
+STATUS_PACKAGE=
+STATUS_DOWNLOADED=0
+STATUS_TOTAL=0
+STATUS_COMPLETED=0
 
 cleanup()
 {
 	[ -z "$WORK" ] || rm -rf "$WORK"
-	rmdir "$LOCK" 2>/dev/null || true
+	[ "$LOCK_HELD" = false ] || rmdir "$LOCK" 2>/dev/null || true
 }
 
 json_error()
 {
+	if [ "$ASYNC" = true ]; then
+		status_write false false failed "$STATUS_PACKAGE" \
+			"$STATUS_DOWNLOADED" "$STATUS_TOTAL" "$STATUS_COMPLETED" "$1"
+		exit 1
+	fi
 	printf '{"success":false,"error":"%s"}\n' "$1"
 	exit 1
+}
+
+status_write()
+{
+	local running="$1" success="$2" phase="$3" package="$4"
+	local downloaded="$5" total="$6" completed="$7" error="$8" tmp
+	tmp=$STATUS.$$
+	printf '{"running":%s,"success":%s,"phase":"%s",' \
+		"$running" "$success" "$phase" > "$tmp"
+	printf '"package":"%s","downloaded":%s,"total":%s,' \
+		"$package" "$downloaded" "$total" >> "$tmp"
+	printf '"completed":%s,"package_count":3,"error":"%s"}\n' \
+		"$completed" "$error" >> "$tmp"
+	mv -f "$tmp" "$STATUS"
+}
+
+read_status()
+{
+	if [ -s "$STATUS" ]; then
+		cat "$STATUS"
+	else
+		printf '%s\n' '{"running":false,"success":false,"phase":"idle","package":"","downloaded":0,"total":0,"completed":0,"package_count":3,"error":""}'
+	fi
 }
 
 field()
@@ -57,6 +94,8 @@ load_manifest()
 	RELEASE=$(field '@.release') || json_error manifest_invalid
 	NOTES=$(field '@.release_notes_url') || json_error manifest_invalid
 	SOURCE_COMMIT=$(field '@.source.commit') || json_error manifest_invalid
+	CONTROLLER_SOURCE_COMMIT=$(field '@.controller_source.commit') ||
+		json_error manifest_invalid
 	CONTROLLER_URL=$(field '@.packages.controller.url') || json_error manifest_invalid
 	CONTROLLER_SHA=$(field '@.packages.controller.sha256') || json_error manifest_invalid
 	CONTROLLER_SIZE=$(field '@.packages.controller.size') || json_error manifest_invalid
@@ -78,9 +117,12 @@ load_manifest()
 		https://github.com/MayorBug/pwm-fan-builds/releases/tag/*) ;;
 		*) json_error manifest_origin_rejected ;;
 	esac
-	[ "${#SOURCE_COMMIT}" -eq 40 ] ||
+	[ "${#SOURCE_COMMIT}" -eq 40 ] &&
+		[ "${#CONTROLLER_SOURCE_COMMIT}" -eq 40 ] ||
 		json_error manifest_invalid
-	case $SOURCE_COMMIT in *[!0-9a-f]*) json_error manifest_invalid ;; esac
+	case $SOURCE_COMMIT:$CONTROLLER_SOURCE_COMMIT in
+		*[!0-9a-f:]*) json_error manifest_invalid ;;
+	esac
 	valid_sha "$CONTROLLER_SHA" && valid_sha "$CORE_SHA" &&
 		valid_sha "$UPDATER_SHA" ||
 		json_error manifest_invalid
@@ -129,6 +171,7 @@ check_update()
 		"${INSTALLED:-not-installed}" "$VERSION" "$RELEASE"
 	printf '"source_commit":"%s","release_notes_url":"%s",' \
 		"$SOURCE_COMMIT" "$NOTES"
+	printf '"controller_source_commit":"%s",' "$CONTROLLER_SOURCE_COMMIT"
 	printf '"version_relation":"%s","update_available":%s,' "$relation" "$update_available"
 	printf '"same_version":%s,"up_to_date":%s}\n' "$same_version" "$up_to_date"
 }
@@ -136,19 +179,45 @@ check_update()
 fetch_package()
 {
 	local name="$1" url="$2" sha="$3" size="$4"
+	local pid downloaded
 
-	"$HTTP_CLIENT" -q -T 30 -O "$WORK/$name" "$url" ||
+	STATUS_PHASE=downloading
+	STATUS_PACKAGE=$name
+	STATUS_DOWNLOADED=0
+	STATUS_TOTAL=$size
+	status_write true null "$STATUS_PHASE" "$name" 0 "$size" \
+		"$STATUS_COMPLETED" ''
+	"$HTTP_CLIENT" -q -T 30 -O "$WORK/$name" "$url" &
+	pid=$!
+	while kill -0 "$pid" 2>/dev/null; do
+		downloaded=$(wc -c < "$WORK/$name" 2>/dev/null || printf 0)
+		STATUS_DOWNLOADED=$downloaded
+		status_write true null "$STATUS_PHASE" "$name" "$downloaded" "$size" \
+			"$STATUS_COMPLETED" ''
+		sleep 1
+	done
+	if ! wait "$pid"; then
 		json_error package_download_failed
+	fi
+	STATUS_DOWNLOADED=$(wc -c < "$WORK/$name")
+	status_write true null verifying "$name" "$STATUS_DOWNLOADED" "$size" \
+		"$STATUS_COMPLETED" ''
 	[ "$(wc -c < "$WORK/$name")" -eq "$size" ] ||
 		json_error package_size_mismatch
 	printf '%s  %s\n' "$sha" "$WORK/$name" | sha256sum -c - >/dev/null ||
 		json_error checksum_failed
+	STATUS_COMPLETED=$((STATUS_COMPLETED + 1))
+	status_write true null verified "$name" "$size" "$size" \
+		"$STATUS_COMPLETED" ''
 }
 
-install_update()
+run_update()
 {
-	mkdir "$LOCK" 2>/dev/null || json_error update_in_progress
+	ASYNC=true
+	LOCK_HELD=true
 	trap cleanup EXIT INT TERM
+	STATUS_PHASE=manifest
+	status_write true null "$STATUS_PHASE" '' 0 0 0 ''
 	load_manifest
 	df -k /tmp | awk 'NR == 2 { exit ($4 < 4096) }' ||
 		json_error insufficient_space
@@ -156,15 +225,29 @@ install_update()
 		"$CONTROLLER_SIZE"
 	fetch_package core.apk "$CORE_URL" "$CORE_SHA" "$CORE_SIZE"
 	fetch_package updater.apk "$UPDATER_URL" "$UPDATER_SHA" "$UPDATER_SIZE"
+	STATUS_PHASE=installing
+	STATUS_PACKAGE=
+	STATUS_DOWNLOADED=0
+	STATUS_TOTAL=0
+	status_write true null "$STATUS_PHASE" '' 0 0 3 ''
 	"$APK" add --allow-untrusted --force-reinstall "$WORK/controller.apk" "$WORK/core.apk" \
 		"$WORK/updater.apk" >/dev/null ||
 		json_error install_failed
-	printf '{"success":true,"version":"%s","release":"%s"}\n' \
-		"$VERSION" "$RELEASE"
+	status_write false true complete '' 0 0 3 ''
+}
+
+start_update()
+{
+	mkdir "$LOCK" 2>/dev/null || json_error update_in_progress
+	status_write true null starting '' 0 0 0 ''
+	"$0" run </dev/null >/dev/null 2>&1 &
+	printf '%s\n' '{"success":true,"started":true}'
 }
 
 case ${1:-} in
 	check) trap cleanup EXIT INT TERM; check_update ;;
-	install) install_update ;;
+	install) start_update ;;
+	status) read_status ;;
+	run) run_update ;;
 	*) exit 2 ;;
 esac

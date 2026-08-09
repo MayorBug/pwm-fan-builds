@@ -19,7 +19,7 @@ fail()
 
 trap cleanup EXIT INT TERM
 command -v apk >/dev/null 2>&1 ||
-	fail 'this community installer supports APK-based OpenWrt only'
+	fail 'this installer supports APK-based OpenWrt only'
 command -v wget >/dev/null 2>&1 || fail 'wget is required'
 command -v sha256sum >/dev/null 2>&1 || fail 'sha256sum is required'
 
@@ -30,7 +30,7 @@ df -k /tmp | awk 'NR == 2 { exit ($4 < 2048) }' ||
 
 for file in pwm-fan-control.apk luci-app-pwm-fan.apk \
 	luci-app-pwm-fan-updater.apk sha256sums; do
-	wget -q -T 20 -O "$WORK/$file" "$RELEASE_BASE/$file" ||
+	wget -T 20 -O "$WORK/$file" "$RELEASE_BASE/$file" ||
 		fail "could not download $file"
 done
 
@@ -47,4 +47,4 @@ apk add --allow-untrusted "$WORK/pwm-fan-control.apk" \
 	"$WORK/luci-app-pwm-fan-updater.apk" ||
 	fail 'APK installation failed'
 
-printf '%s\n' 'PWM Fan Control community packages installed successfully.'
+printf '%s\n' 'PWM Fan packages installed successfully.'

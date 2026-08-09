@@ -28,6 +28,9 @@ return {
 		check: {
 			call: function() { return helper('check'); }
 		},
+		status: {
+			call: function() { return helper('status'); }
+		},
 		install: {
 			call: function() { return helper('install'); }
 		}

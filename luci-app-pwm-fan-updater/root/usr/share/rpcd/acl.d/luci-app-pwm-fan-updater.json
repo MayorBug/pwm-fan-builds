@@ -1,9 +1,9 @@
 {
 	"luci-app-pwm-fan-updater": {
-		"description": "Check and install PWM Fan community updates",
+		"description": "Check and install LuCI PWM Fan builds",
 		"read": {
 			"ubus": {
-				"pwm.fan.update": [ "check" ]
+				"pwm.fan.update": [ "check", "status" ]
 			}
 		},
 		"write": {
