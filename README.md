@@ -1,16 +1,22 @@
 # LuCI PWM Fan Builds
 
-This repository builds three PWM Fan APK packages from these branches:
+This repository builds APK releases for PWM Fan Control. It also adds an
+optional LuCI updater to the application.
 
-- `MayorBug/packages:pwm-fan-control` supplies the controller.
-- `MayorBug/luci:luci-app-pwm-fan` supplies the LuCI application.
+The build uses these sources:
+
+- [pwm-fan-control](https://github.com/MayorBug/packages/tree/pwm-fan-control/utils/pwm-fan-control)
+  supplies the controller service and CLI.
+- [luci-app-pwm-fan](https://github.com/MayorBug/luci/tree/luci-app-pwm-fan/applications/luci-app-pwm-fan)
+  supplies the LuCI application.
+- The additional app updater is supplied by this repo.
 
 The workflow resolves each source revision to one commit. It records the
 OpenWrt, LuCI-feed, and packages-feed commits in the release metadata.
 
 The LuCI version sets the first release tag. Later builds use a release number
-that is one greater than the highest existing `rN` value. Deleted gaps are not
-reused. All three APK packages use the same release number.
+that is one greater than the highest existing `rN` value. The workflow does
+not reuse deleted gaps. All three APK packages use the same release number.
 
 Each GitHub release contains these files:
 
@@ -21,25 +27,27 @@ Each GitHub release contains these files:
 - `latest.json`
 - `install.sh`
 
-## Build modes
+## Router support
 
-Development mode restores the newest Linux build state. This cache can use an
-older OpenWrt commit or configuration. The workflow then compiles only the
-three PWM Fan packages.
+The application can work on other OpenWrt routers with a built in fan. The
+device profile must select `kmod-hwmon-pwmfan` by default.
 
-If package compilation fails, the workflow erases the generated build state.
-It keeps the download cache. Then it builds the OpenWrt prerequisites and
-retries the packages one time.
+Tested:
 
-Clean release mode does not restore generated build state. It builds all
-required OpenWrt prerequisites before it compiles the packages.
+- WS1610
+- H5000M
+- GL.iNet Beryl 7 (`GL-MT3600BE`)
 
-Both modes use a separate download cache. Every workflow run gets the newest
-PWM Fan source commits.
+List of other devices that should also work:
 
-Before publication, the workflow examines the contents of all three APK
-packages. The build job has read-only repository access. A separate publish
-job creates the GitHub release.
+- GL-MT3000
+- GL-X3000 and GL-XE3000 family
+- GL-AXT1800
+- AirPi AP3000M
+- CF-WR632AX
+- Huasifei WH3000 Pro
+- Arcadyan Mozart
+- SmartRG family
 
 ## Installation
 
