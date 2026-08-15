@@ -3,6 +3,8 @@
 This repository builds APK releases for PWM Fan Control. It also adds an
 optional LuCI updater to the application.
 
+<img width="2441" height="2084" alt="image" src="https://github.com/user-attachments/assets/5f717dd4-5c17-4e7e-b515-7268abfa35d9" />
+
 The build uses these sources:
 
 - [pwm-fan-control](https://github.com/MayorBug/packages/tree/pwm-fan-control/utils/pwm-fan-control)
