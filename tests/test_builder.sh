@@ -46,6 +46,7 @@ grep -Fq 'test ! -e "$updater_root/usr/sbin/pwm-fan-control"' "$WORKFLOW"
 grep -Fq 'uses: actions/upload-artifact@v7' "$WORKFLOW"
 grep -Fq 'uses: actions/download-artifact@v8' "$WORKFLOW"
 grep -Fq 'persist-credentials: false' "$WORKFLOW"
+grep -Fq 'delivery/tests/run_tests.sh' "$WORKFLOW"
 
 grep -A3 -F 'restore-keys: |' "$WORKFLOW" |
 	grep -Fq 'pwm-fan-generated-v2-${{ runner.os }}-'
