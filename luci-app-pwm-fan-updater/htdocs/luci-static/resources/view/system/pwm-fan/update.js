@@ -175,7 +175,8 @@ function renderCheck(body, status) {
 				])
 			]);
 		}
-	}, [ status.update_available ? _('Download new build') : _('Up to date') ]);
+	}, [ status.update_available ? _('Download new build')
+		: sameVersion ? _('Reinstall current build') : _('Up to date') ]);
 	body.appendChild(action);
 }
 

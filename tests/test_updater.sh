@@ -75,6 +75,7 @@ check_case 2.1.0-r1 '>' false false
 
 grep -Fq "_('Download new build')" "$VIEW"
 grep -Fq "_('Up to date')" "$VIEW"
+grep -Fq "_('Reinstall current build')" "$VIEW"
 grep -Fq "_('Reinstall current build?')" "$VIEW"
 grep -Fq "_('Controller source commit')" "$VIEW"
 grep -Fq "method: 'status'" "$VIEW"
