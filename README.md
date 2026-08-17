@@ -31,8 +31,14 @@ Each GitHub release contains these files:
 
 ## Router support
 
-The application can work on other OpenWrt routers with a built in fan. The
-device profile must select `kmod-hwmon-pwmfan` by default.
+A fan in the router does not by itself make the router compatible.
+
+A compatible router has these items:
+
+- a device-tree `pwm-fan` device
+- a writable PWM output through Linux hwmon
+- a readable CPU thermal zone
+- a thermal cooling policy that uses the PWM fan
 
 Tested:
 
@@ -40,7 +46,7 @@ Tested:
 - H5000M
 - GL.iNet Beryl 7 (`GL-MT3600BE`)
 
-List of other devices that should also work:
+Untested candidates:
 
 - GL-MT3000
 - GL-X3000 and GL-XE3000 family
