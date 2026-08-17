@@ -4,11 +4,13 @@
 set -eu
 umask 077
 
-MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/latest.json
+STABLE_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/latest.json
+DEVELOPMENT_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/download/development/latest.json
 RELEASE_PREFIX=https://github.com/MayorBug/pwm-fan-builds/releases/download/
 HTTP_CLIENT=${PWM_FAN_UPDATE_HTTP_CLIENT:-uclient-fetch}
 JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
 APK=${PWM_FAN_UPDATE_APK:-apk}
+UCI=${PWM_FAN_UPDATE_UCI:-uci}
 WORK=
 LOCK=/tmp/pwm-fan-update.lock
 STATUS=${PWM_FAN_UPDATE_STATUS:-/tmp/pwm-fan-update-status.json}
@@ -19,6 +21,30 @@ STATUS_PACKAGE=
 STATUS_DOWNLOADED=0
 STATUS_TOTAL=0
 STATUS_COMPLETED=0
+
+read_channel()
+{
+	local channel
+	channel=$("$UCI" -q get pwm_fan_updater.main.channel 2>/dev/null || true)
+	case $channel in
+		stable|development) printf '%s\n' "$channel" ;;
+		*) printf '%s\n' stable ;;
+	esac
+}
+
+set_channel()
+{
+	case ${1:-} in
+		stable|development) ;;
+		*) json_error invalid_channel ;;
+	esac
+	"$UCI" -q batch <<-EOF || json_error channel_save_failed
+		set pwm_fan_updater.main=updater
+		set pwm_fan_updater.main.channel='$1'
+		commit pwm_fan_updater
+	EOF
+	printf '{"success":true,"channel":"%s"}\n' "$1"
+}
 
 cleanup()
 {
@@ -83,9 +109,15 @@ valid_sha()
 
 load_manifest()
 {
+	local manifest_url
+	SELECTED_CHANNEL=$(read_channel)
+	case $SELECTED_CHANNEL in
+		stable) manifest_url=$STABLE_MANIFEST_URL ;;
+		development) manifest_url=$DEVELOPMENT_MANIFEST_URL ;;
+	esac
 	WORK=$(mktemp -d /tmp/pwm-fan-update.XXXXXX) ||
 		json_error temporary_directory_failed
-	"$HTTP_CLIENT" -q -T 20 -O "$WORK/latest.json" "$MANIFEST_URL" ||
+	"$HTTP_CLIENT" -q -T 20 -O "$WORK/latest.json" "$manifest_url" ||
 		json_error manifest_download_failed
 
 	SCHEMA=$(field '@.schema') || json_error manifest_invalid
@@ -106,7 +138,7 @@ load_manifest()
 	UPDATER_SHA=$(field '@.packages.updater.sha256') || json_error manifest_invalid
 	UPDATER_SIZE=$(field '@.packages.updater.size') || json_error manifest_invalid
 
-	[ "$SCHEMA" = 1 ] && [ "$CHANNEL" = stable ] ||
+	[ "$SCHEMA" = 1 ] && [ "$CHANNEL" = "$SELECTED_CHANNEL" ] ||
 		json_error manifest_invalid
 	valid_version "$VERSION" && valid_version "$RELEASE" ||
 		json_error manifest_invalid
@@ -172,6 +204,7 @@ check_update()
 	printf '"source_commit":"%s","release_notes_url":"%s",' \
 		"$SOURCE_COMMIT" "$NOTES"
 	printf '"controller_source_commit":"%s",' "$CONTROLLER_SOURCE_COMMIT"
+	printf '"channel":"%s",' "$SELECTED_CHANNEL"
 	printf '"version_relation":"%s","update_available":%s,' "$relation" "$update_available"
 	printf '"same_version":%s,"up_to_date":%s}\n' "$same_version" "$up_to_date"
 }
@@ -246,6 +279,8 @@ start_update()
 
 case ${1:-} in
 	check) trap cleanup EXIT INT TERM; check_update ;;
+	channel-get) printf '{"success":true,"channel":"%s"}\n' "$(read_channel)" ;;
+	channel-set) set_channel "${2:-}" ;;
 	install) start_update ;;
 	status) read_status ;;
 	run) run_update ;;

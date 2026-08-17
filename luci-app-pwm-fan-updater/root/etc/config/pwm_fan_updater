@@ -1,0 +1,2 @@
+config updater 'main'
+	option channel 'stable'

@@ -402,7 +402,9 @@ jobs:
                 updater:{version:$version, release:$release,
                   url:$updater_url, sha256:$updater_sha, size:$updater_size}
               }}' > release/latest.json
-          cp delivery/install.sh release/install.sh
+          sed "s|@SELF_MANIFEST_URL@|$base/latest.json|g" \
+            delivery/install.sh > release/install.sh
+          chmod 0755 release/install.sh
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
@@ -438,4 +440,16 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "LuCI PWM Fan Builds ${release_tag#v}" \
             --notes "PWM Fan APK build from LuCI commit $(jq -r '.source.commit' release/latest.json) and controller commit $(jq -r '.controller_source.commit' release/latest.json)." \
-            --latest
+            --prerelease
+
+          mkdir development
+          jq '.channel = "development"' release/latest.json > development/latest.json
+          if ! gh release view development --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create development \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "PWM Fan development channel" \
+              --notes "This prerelease contains the manifest for the newest development build." \
+              --prerelease
+          fi
+          gh release upload development development/latest.json \
+            --repo "$GITHUB_REPOSITORY" --clobber

@@ -25,7 +25,7 @@ while [ "$#" -gt 0 ]; do
 done
 case $expression in
 	'@.schema') printf '1\n' ;;
-	'@.channel') printf 'stable\n' ;;
+	'@.channel') printf '%s\n' "${TEST_MANIFEST_CHANNEL:-stable}" ;;
 	'@.version') printf '2.0.0\n' ;;
 	'@.release') printf '1\n' ;;
 	'@.release_notes_url') printf 'https://github.com/MayorBug/pwm-fan-builds/releases/tag/v2.0.0-r1\n' ;;
@@ -37,6 +37,15 @@ case $expression in
 	'@.packages.controller.sha256'|'@.packages.core.sha256'|'@.packages.updater.sha256')
 		printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' ;;
 	'@.packages.controller.size'|'@.packages.core.size'|'@.packages.updater.size') printf '100\n' ;;
+	*) exit 1 ;;
+esac
+EOF
+
+cat > "$TEST_TMP/bin/uci" <<'EOF'
+#!/bin/sh
+case $* in
+	'-q get pwm_fan_updater.main.channel') printf '%s\n' "${TEST_CHANNEL:-stable}" ;;
+	'-q batch') cat > "${TEST_UCI_LOG:-/dev/null}" ;;
 	*) exit 1 ;;
 esac
 EOF
@@ -54,24 +63,27 @@ chmod +x "$TEST_TMP/bin/"*
 
 check_case()
 {
-	TEST_INSTALLED=$1 TEST_RELATION=$2 \
+	TEST_INSTALLED=$1 TEST_RELATION=$2 TEST_CHANNEL=$5 TEST_MANIFEST_CHANNEL=$5 \
 	PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch \
 	PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter \
 	PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk \
+	PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
 		"$UPDATER" check > "$TEST_TMP/result.json"
-	python3 - "$TEST_TMP/result.json" "$3" "$4" <<'PY'
+	python3 - "$TEST_TMP/result.json" "$3" "$4" "$5" <<'PY'
 import json, pathlib, sys
 value = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert value['success'] is True
 assert value['update_available'] is (sys.argv[2] == 'true')
 assert value['same_version'] is (sys.argv[3] == 'true')
 assert value['controller_source_commit'] == 'fedcba9876543210fedcba9876543210fedcba98'
+assert value['channel'] == sys.argv[4]
 PY
 }
 
-check_case 1.9.0-r2 '<' true false
-check_case 2.0.0-r1 '=' false true
-check_case 2.1.0-r1 '>' false false
+check_case 1.9.0-r2 '<' true false stable
+check_case 2.0.0-r1 '=' false true stable
+check_case 2.1.0-r1 '>' false false stable
+check_case 1.9.0-r2 '<' true false development
 
 grep -Fq "_('Download new build')" "$VIEW"
 grep -Fq "_('Up to date')" "$VIEW"
@@ -83,6 +95,11 @@ grep -Fq "E('progress'" "$VIEW"
 grep -Fq "_('Files: %d of %d')" "$VIEW"
 grep -Fq "_('Reconnecting to updater…')" "$VIEW"
 grep -Fq "_('Checking for updates…')" "$VIEW"
+grep -Fq "_('Update channel')" "$VIEW"
+grep -Fq "_('Stable')" "$VIEW"
+grep -Fq "_('Development')" "$VIEW"
+grep -Fq "method: 'set_channel'" "$VIEW"
+grep -Fq "_('The installed build is newer than the selected channel.')" "$VIEW"
 grep -Fq 'load: function() {' "$VIEW"
 grep -Fq 'return Promise.resolve();' "$VIEW"
 grep -Fq 'callCheck().then(function(status)' "$VIEW"
@@ -98,6 +115,27 @@ fi
 grep -Fq 'status) read_status' "$UPDATER"
 grep -Fq 'STATUS_PHASE=downloading' "$UPDATER"
 grep -Fq 'wc -c < "$WORK/$name"' "$UPDATER"
+grep -Fq 'DEVELOPMENT_MANIFEST_URL=' "$UPDATER"
+grep -Fq 'SELECTED_CHANNEL=$(read_channel)' "$UPDATER"
+grep -Fq '[ "$CHANNEL" = "$SELECTED_CHANNEL" ]' "$UPDATER"
+grep -Fq '/etc/config/pwm_fan_updater' "$ROOT/luci-app-pwm-fan-updater/Makefile"
+grep -Fq "option channel 'stable'" \
+	"$ROOT/luci-app-pwm-fan-updater/root/etc/config/pwm_fan_updater"
+
+TEST_CHANNEL=development TEST_UCI_LOG=$TEST_TMP/uci.log \
+PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
+	"$UPDATER" channel-get > "$TEST_TMP/channel.json"
+grep -Fq '"channel":"development"' "$TEST_TMP/channel.json"
+TEST_UCI_LOG=$TEST_TMP/uci.log PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
+	"$UPDATER" channel-set development > "$TEST_TMP/channel-set.json"
+grep -Fq '"success":true' "$TEST_TMP/channel-set.json"
+grep -Fq "set pwm_fan_updater.main.channel='development'" "$TEST_TMP/uci.log"
+if PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci "$UPDATER" channel-set invalid \
+	> "$TEST_TMP/invalid-channel.json"; then
+	echo 'invalid update channel was accepted' >&2
+	exit 1
+fi
+grep -Fq '"error":"invalid_channel"' "$TEST_TMP/invalid-channel.json"
 
 status_file=$TEST_TMP/status.json
 PWM_FAN_UPDATE_STATUS=$status_file "$UPDATER" status > "$TEST_TMP/status-result.json"
@@ -113,6 +151,7 @@ PWM_FAN_UPDATE_STATUS=$status_file \
 PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch \
 PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter \
 PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk \
+PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
 	"$UPDATER" install > "$TEST_TMP/start-result.json"
 python3 - "$TEST_TMP/start-result.json" <<'PY'
 import json, pathlib, sys
@@ -138,5 +177,10 @@ if grep -Eq 'wget[[:space:]]+-q' "$ROOT/install.sh"; then
 	echo 'installer still suppresses wget download progress' >&2
 	exit 1
 fi
+grep -Fq 'SELF_MANIFEST_URL=@SELF_MANIFEST_URL@' "$ROOT/install.sh"
+grep -Fq 'add_if_needed pwm-fan-control' "$ROOT/install.sh"
+grep -Fq 'add_if_needed luci-app-pwm-fan' "$ROOT/install.sh"
+grep -Fq 'fetch_package "$WORK/self.json" updater' "$ROOT/install.sh"
+grep -Fq "set pwm_fan_updater.main.channel='stable'" "$ROOT/install.sh"
 
 printf 'PWM Fan updater assertions passed.\n'

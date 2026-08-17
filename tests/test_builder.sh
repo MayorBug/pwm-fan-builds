@@ -5,6 +5,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 WORKFLOW=$ROOT/.github/workflows/build.yml
+PROMOTE=$ROOT/.github/workflows/promote.yml
 
 grep -Fq 'PACKAGES_REPOSITORY: https://github.com/MayorBug/packages' "$WORKFLOW"
 grep -Fq 'PACKAGES_BRANCH: pwm-fan-control' "$WORKFLOW"
@@ -47,6 +48,26 @@ grep -Fq 'uses: actions/upload-artifact@v7' "$WORKFLOW"
 grep -Fq 'uses: actions/download-artifact@v8' "$WORKFLOW"
 grep -Fq 'persist-credentials: false' "$WORKFLOW"
 grep -Fq 'delivery/tests/run_tests.sh' "$WORKFLOW"
+grep -Fq -- '--prerelease' "$WORKFLOW"
+grep -Fq 'gh release upload development development/latest.json' "$WORKFLOW"
+grep -Fq "jq '.channel = \"development\"'" "$WORKFLOW"
+grep -Fq 'sed "s|@SELF_MANIFEST_URL@|$base/latest.json|g"' "$WORKFLOW"
+if sed -n '/gh release create "$release_tag"/,/^$/p' "$WORKFLOW" |
+	grep -Fq -- '--latest'; then
+	echo 'development build is marked as latest' >&2
+	exit 1
+fi
+
+grep -Fq 'release_tag:' "$PROMOTE"
+grep -Fq 'gh release download "$RELEASE_TAG"' "$PROMOTE"
+grep -Fq 'sha256sum -c sha256sums' "$PROMOTE"
+grep -Fq 'Release is not a prerelease' "$PROMOTE"
+grep -Fq -- '--prerelease=false --latest' "$PROMOTE"
+grep -Fq 'grep -Fq "$base/latest.json" release/install.sh' "$PROMOTE"
+if grep -Eq '(^|[[:space:]])make([[:space:]]|$)|actions/checkout' "$PROMOTE"; then
+	echo 'promotion workflow rebuilds or checks out source' >&2
+	exit 1
+fi
 
 grep -A3 -F 'restore-keys: |' "$WORKFLOW" |
 	grep -Fq 'pwm-fan-generated-v2-${{ runner.os }}-'

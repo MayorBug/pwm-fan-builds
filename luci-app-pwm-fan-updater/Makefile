@@ -3,7 +3,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-pwm-fan-updater
-PKG_VERSION:=0.3.0
+PKG_VERSION:=0.4.0
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-2.0-only
 PKG_MAINTAINER:=Georg Seema <georgseema@gmail.com>
@@ -26,6 +26,10 @@ define Package/luci-app-pwm-fan-updater/install
 	$(INSTALL_DIR) $(1)/www
 	$(CP) ./htdocs/* $(1)/www/
 	$(CP) ./root/* $(1)/
+endef
+
+define Package/luci-app-pwm-fan-updater/conffiles
+/etc/config/pwm_fan_updater
 endef
 
 define Package/luci-app-pwm-fan-updater/postinst

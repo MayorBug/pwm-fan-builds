@@ -5,7 +5,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 
-for test in test_builder.sh test_updater.sh; do
+for test in test_builder.sh test_updater.sh test_installer.sh; do
 	printf '==> %s\n' "$test"
 	"$ROOT/$test"
 done

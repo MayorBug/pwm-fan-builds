@@ -3,12 +3,12 @@
 		"description": "Check and install LuCI PWM Fan builds",
 		"read": {
 			"ubus": {
-				"pwm.fan.update": [ "check", "status" ]
+				"pwm.fan.update": [ "check", "status", "channel" ]
 			}
 		},
 		"write": {
 			"ubus": {
-				"pwm.fan.update": [ "install" ]
+				"pwm.fan.update": [ "install", "set_channel" ]
 			}
 		}
 	}

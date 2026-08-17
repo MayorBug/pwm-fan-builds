@@ -22,6 +22,12 @@ var callStatus = rpc.declare({
 	method: 'status',
 	expect: { '': { running: false, success: false, phase: 'idle' } }
 });
+var callSetChannel = rpc.declare({
+	object: 'pwm.fan.update',
+	method: 'set_channel',
+	params: [ 'channel' ],
+	expect: { '': { success: false } }
+});
 
 function errorText(code) {
 	return {
@@ -33,7 +39,9 @@ function errorText(code) {
 		checksum_failed: _('The downloaded APK checksum did not match.'),
 		update_in_progress: _('Another update is already running.'),
 		insufficient_space: _('There is not enough temporary storage for the update.'),
-		install_failed: _('APK could not install the update.')
+		install_failed: _('APK could not install the update.'),
+		invalid_channel: _('The selected update channel is invalid.'),
+		channel_save_failed: _('The update channel could not be saved.')
 	}[code] || _('The update operation failed.');
 }
 
@@ -137,6 +145,10 @@ function renderCheck(body, status) {
 		E('strong', {}, [ _('Installed version') ]),
 		E('div', {}, [ status.installed ])
 	]));
+	if (status.version_relation === '>')
+		body.appendChild(E('p', { 'class': 'pwm-v2-muted' }, [
+			_('The installed build is newer than the selected channel.')
+		]));
 	body.appendChild(E('div', {}, [
 		E('strong', {}, [ _('Latest build') ]),
 		E('div', {}, [ '%s-r%s'.format(status.version, status.release) ])
@@ -190,19 +202,63 @@ return view.extend({
 	},
 
 	render: function() {
+		var selectedChannel = 'stable';
+		var channelNote = E('p', { 'class': 'pwm-v2-muted' });
 		var body = E('div', { 'class': 'pwm-v2-field-grid' }, [
 			E('p', { 'class': 'pwm-v2-muted' }, [ _('Checking for updates…') ])
 		]);
-		callCheck().then(function(status) {
-			renderCheck(body, status);
-		}).catch(function() {
-			renderCheck(body, { success: false, error: 'manifest_download_failed' });
-		});
+		var channel = E('select', {
+			'aria-label': _('Update channel'),
+			'change': function(ev) {
+				var value = ev.currentTarget.value;
+				ev.currentTarget.disabled = true;
+				body.replaceChildren(E('p', { 'class': 'pwm-v2-muted' }, [
+					_('Checking for updates…')
+				]));
+				return callSetChannel(value).then(function(result) {
+					if (!result.success)
+						throw new Error(errorText(result.error));
+					selectedChannel = value;
+					return refresh();
+				}).catch(function(error) {
+					ev.currentTarget.value = selectedChannel;
+					body.replaceChildren(E('p', { 'class': 'alert-message error' }, [
+						error.message
+					]));
+				}).finally(function() {
+					ev.currentTarget.disabled = false;
+				});
+			}
+		}, [
+			E('option', { 'value': 'stable' }, [ _('Stable') ]),
+			E('option', { 'value': 'development' }, [ _('Development') ])
+		]);
+
+		function refresh() {
+			return callCheck().then(function(status) {
+				if (status.channel === 'stable' || status.channel === 'development') {
+					selectedChannel = status.channel;
+					channel.value = selectedChannel;
+				}
+				channelNote.textContent = selectedChannel === 'development'
+					? _('Development builds are for testing and can contain defects.')
+					: _('Stable builds are ready for normal use.');
+				renderCheck(body, status);
+			}).catch(function() {
+				renderCheck(body, { success: false, error: 'manifest_download_failed' });
+			});
+		}
+
+		refresh();
 
 		return E([], [
 			fanV2.stylesheet(),
 			E('div', { 'class': 'pwm-v2', 'data-page': 'update' }, [
-				fanV2.card(_('PWM Fan Builds'), body)
+				fanV2.card(_('PWM Fan Builds'), E('div', {}, [
+					E('label', {}, [ E('strong', {}, [ _('Update channel') ]), channel ]),
+					channelNote,
+					body
+				]))
 			])
 		]);
 	}

@@ -23,10 +23,25 @@ function helper(action) {
 	}
 }
 
+function set_channel(request) {
+	let channel = request?.channel;
+
+	if (channel != 'stable' && channel != 'development')
+		return { success: false, error: 'invalid_channel' };
+	return helper('channel-set ' + channel);
+}
+
 return {
 	'pwm.fan.update': {
 		check: {
 			call: function() { return helper('check'); }
+		},
+		channel: {
+			call: function() { return helper('channel-get'); }
+		},
+		set_channel: {
+			args: { channel: 'stable' },
+			call: set_channel
 		},
 		status: {
 			call: function() { return helper('status'); }
