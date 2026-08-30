@@ -24,7 +24,7 @@ New builds first appear as GitHub prereleases. The Development channel shows
 the newest prerelease. The Stable channel does not show a prerelease.
 
 After a device test, run the **Promote PWM Fan Build** workflow. Enter the
-tested tag, such as `v0.4.0-r1`. Promotion marks the same APK files as Stable.
+tested tag, such as `v1.0.0-r1`. Promotion marks the same APK files as Stable.
 It does not rebuild the packages.
 
 Each GitHub release contains these files:
@@ -80,7 +80,7 @@ SHA-256 value before installation.
 Open the required prerelease and copy its direct installer command. Example:
 
 ```sh
-wget -qO- https://github.com/MayorBug/pwm-fan-builds/releases/download/v0.4.0-r1/install.sh | sh
+wget -qO- https://github.com/MayorBug/pwm-fan-builds/releases/download/v1.0.0-r1/install.sh | sh
 ```
 
 Before promotion, this installer keeps the stable controller and LuCI app. It

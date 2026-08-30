@@ -24,7 +24,7 @@ function helper(action) {
 }
 
 function set_channel(request) {
-	let channel = request?.channel;
+	let channel = request?.args?.channel;
 
 	if (channel != 'stable' && channel != 'development')
 		return { success: false, error: 'invalid_channel' };

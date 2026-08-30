@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 'use strict';
-'require pwm.fan_v2 as fanV2';
+'require pwm.fan_components as fanComponents';
 'require rpc';
 'require ui';
 'require view';
-/* global fanV2 */
+/* global fanComponents */
 
 var callCheck = rpc.declare({
 	object: 'pwm.fan.update',
@@ -50,6 +50,17 @@ function formatBytes(value) {
 	return value < 1024 ? _('%d B').format(value) : _('%s KiB').format((value / 1024).toFixed(1));
 }
 
+function withTimeout(promise, milliseconds) {
+	return Promise.race([
+		promise,
+		new Promise(function(resolve, reject) {
+			window.setTimeout(function() {
+				reject(new Error(errorText('manifest_download_failed')));
+			}, milliseconds);
+		})
+	]);
+}
+
 function phaseText(status) {
 	switch (status.phase) {
 	case 'starting': return _('Starting update…');
@@ -66,7 +77,7 @@ function phaseText(status) {
 
 function showProgress(mainButton) {
 	var message = E('p', {}, [ _('Starting update…') ]);
-	var detail = E('p', { 'class': 'pwm-v2-muted' }, [ _('Files: 0 of 3') ]);
+	var detail = E('p', { 'class': 'pwm-fan-muted' }, [ _('Files: 0 of 3') ]);
 	var progress = E('progress', { 'max': 100, 'value': 0, 'style': 'width:100%' });
 	var actions = E('div', { 'class': 'right' });
 	var reconnectAttempts = 0;
@@ -146,7 +157,7 @@ function renderCheck(body, status) {
 		E('div', {}, [ status.installed ])
 	]));
 	if (status.version_relation === '>')
-		body.appendChild(E('p', { 'class': 'pwm-v2-muted' }, [
+		body.appendChild(E('p', { 'class': 'pwm-fan-muted' }, [
 			_('The installed build is newer than the selected channel.')
 		]));
 	body.appendChild(E('div', {}, [
@@ -203,30 +214,37 @@ return view.extend({
 
 	render: function() {
 		var selectedChannel = 'stable';
-		var channelNote = E('p', { 'class': 'pwm-v2-muted' });
-		var body = E('div', { 'class': 'pwm-v2-field-grid' }, [
-			E('p', { 'class': 'pwm-v2-muted' }, [ _('Checking for updates…') ])
+		var refreshGeneration = 0;
+		var channelNote = E('p', { 'class': 'pwm-fan-muted' });
+		var body = E('div', { 'class': 'pwm-fan-field-grid' }, [
+			E('p', { 'class': 'pwm-fan-muted' }, [ _('Checking for updates…') ])
 		]);
 		var channel = E('select', {
 			'aria-label': _('Update channel'),
 			'change': function(ev) {
 				var value = ev.currentTarget.value;
 				ev.currentTarget.disabled = true;
-				body.replaceChildren(E('p', { 'class': 'pwm-v2-muted' }, [
+				channelNote.textContent = value === 'development'
+					? _('Development builds are for testing and can contain defects.')
+					: _('Stable builds are ready for normal use.');
+				body.replaceChildren(E('p', { 'class': 'pwm-fan-muted' }, [
 					_('Checking for updates…')
 				]));
-				return callSetChannel(value).then(function(result) {
+				return withTimeout(callSetChannel(value), 10000).then(function(result) {
 					if (!result.success)
 						throw new Error(errorText(result.error));
 					selectedChannel = value;
+					ev.currentTarget.disabled = false;
 					return refresh();
 				}).catch(function(error) {
+					ev.currentTarget.disabled = false;
 					ev.currentTarget.value = selectedChannel;
+					channelNote.textContent = selectedChannel === 'development'
+						? _('Development builds are for testing and can contain defects.')
+						: _('Stable builds are ready for normal use.');
 					body.replaceChildren(E('p', { 'class': 'alert-message error' }, [
 						error.message
 					]));
-				}).finally(function() {
-					ev.currentTarget.disabled = false;
 				});
 			}
 		}, [
@@ -235,7 +253,10 @@ return view.extend({
 		]);
 
 		function refresh() {
-			return callCheck().then(function(status) {
+			var generation = ++refreshGeneration;
+			return withTimeout(callCheck(), 30000).then(function(status) {
+				if (generation !== refreshGeneration)
+					return;
 				if (status.channel === 'stable' || status.channel === 'development') {
 					selectedChannel = status.channel;
 					channel.value = selectedChannel;
@@ -245,6 +266,8 @@ return view.extend({
 					: _('Stable builds are ready for normal use.');
 				renderCheck(body, status);
 			}).catch(function() {
+				if (generation !== refreshGeneration)
+					return;
 				renderCheck(body, { success: false, error: 'manifest_download_failed' });
 			});
 		}
@@ -252,9 +275,9 @@ return view.extend({
 		refresh();
 
 		return E([], [
-			fanV2.stylesheet(),
-			E('div', { 'class': 'pwm-v2', 'data-page': 'update' }, [
-				fanV2.card(_('PWM Fan Builds'), E('div', {}, [
+			fanComponents.stylesheet(),
+			E('div', { 'class': 'pwm-fan', 'data-page': 'update' }, [
+				fanComponents.card(_('PWM Fan Builds'), E('div', {}, [
 					E('label', {}, [ E('strong', {}, [ _('Update channel') ]), channel ]),
 					channelNote,
 					body

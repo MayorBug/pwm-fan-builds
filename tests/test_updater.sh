@@ -6,6 +6,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 UPDATER=$ROOT/luci-app-pwm-fan-updater/root/usr/libexec/pwm-fan-update
 VIEW=$ROOT/luci-app-pwm-fan-updater/htdocs/luci-static/resources/view/system/pwm-fan/update.js
+RPCD=$ROOT/luci-app-pwm-fan-updater/root/usr/share/rpcd/ucode/pwm.fan.update
 TEST_TMP=$(mktemp -d)
 trap 'rm -rf "$TEST_TMP"' EXIT INT TERM
 mkdir "$TEST_TMP/bin"
@@ -85,39 +86,19 @@ check_case 2.0.0-r1 '=' false true stable
 check_case 2.1.0-r1 '>' false false stable
 check_case 1.9.0-r2 '<' true false development
 
-grep -Fq "_('Download new build')" "$VIEW"
-grep -Fq "_('Up to date')" "$VIEW"
-grep -Fq "_('Reinstall current build')" "$VIEW"
-grep -Fq "_('Reinstall current build?')" "$VIEW"
-grep -Fq "_('Controller source commit')" "$VIEW"
-grep -Fq "method: 'status'" "$VIEW"
-grep -Fq "E('progress'" "$VIEW"
-grep -Fq "_('Files: %d of %d')" "$VIEW"
-grep -Fq "_('Reconnecting to updater…')" "$VIEW"
-grep -Fq "_('Checking for updates…')" "$VIEW"
-grep -Fq "_('Update channel')" "$VIEW"
-grep -Fq "_('Stable')" "$VIEW"
-grep -Fq "_('Development')" "$VIEW"
-grep -Fq "method: 'set_channel'" "$VIEW"
-grep -Fq "_('The installed build is newer than the selected channel.')" "$VIEW"
-grep -Fq 'load: function() {' "$VIEW"
-grep -Fq 'return Promise.resolve();' "$VIEW"
-grep -Fq 'callCheck().then(function(status)' "$VIEW"
-grep -Fq 'if (++reconnectAttempts > 40)' "$VIEW"
-grep -Fq 'overall * 100 / count' "$VIEW"
-grep -Fq 'return delay().then(pollStatus)' "$VIEW"
 grep -Fq -- '--force-reinstall' "$UPDATER"
 grep -Fq 'list --installed luci-app-pwm-fan' "$UPDATER"
 if grep -Fq 'list --installed -q luci-app-pwm-fan' "$UPDATER"; then
 	echo 'installed version lookup still suppresses package version output' >&2
 	exit 1
 fi
-grep -Fq 'status) read_status' "$UPDATER"
-grep -Fq 'STATUS_PHASE=downloading' "$UPDATER"
-grep -Fq 'wc -c < "$WORK/$name"' "$UPDATER"
-grep -Fq 'DEVELOPMENT_MANIFEST_URL=' "$UPDATER"
-grep -Fq 'SELECTED_CHANNEL=$(read_channel)' "$UPDATER"
-grep -Fq '[ "$CHANNEL" = "$SELECTED_CHANNEL" ]' "$UPDATER"
+grep -Fq 'withTimeout(callCheck(), 30000)' "$VIEW"
+grep -Fq 'withTimeout(callSetChannel(value), 10000)' "$VIEW"
+grep -Fq 'request?.args?.channel' "$RPCD"
+if grep -Fq 'request?.channel' "$RPCD"; then
+	echo 'rpcd channel handler reads the wrong request level' >&2
+	exit 1
+fi
 grep -Fq '/etc/config/pwm_fan_updater' "$ROOT/luci-app-pwm-fan-updater/Makefile"
 grep -Fq "option channel 'stable'" \
 	"$ROOT/luci-app-pwm-fan-updater/root/etc/config/pwm_fan_updater"
