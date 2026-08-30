@@ -63,7 +63,7 @@ grep -Fq 'gh release download "$RELEASE_TAG"' "$PROMOTE"
 grep -Fq 'sha256sum -c sha256sums' "$PROMOTE"
 grep -Fq 'Release is not a prerelease' "$PROMOTE"
 grep -Fq -- '--prerelease=false --latest' "$PROMOTE"
-grep -Fq 'grep -Fq "$base/latest.json" release/install.sh' "$PROMOTE"
+grep -Fq 'grep -Fq "$release_base/latest.json" release/install.sh' "$PROMOTE"
 if grep -Eq '(^|[[:space:]])make([[:space:]]|$)|actions/checkout' "$PROMOTE"; then
 	echo 'promotion workflow rebuilds or checks out source' >&2
 	exit 1

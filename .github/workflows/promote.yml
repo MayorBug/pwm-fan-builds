@@ -53,12 +53,22 @@ jobs:
             echo 'Release tag does not match latest.json' >&2
             exit 1
           }
-          [ "$(jq -er '.channel' release/latest.json)" = stable ]
-          base="https://github.com/MayorBug/pwm-fan-builds/releases/download/$RELEASE_TAG/"
-          jq -er --arg base "$base" '
+          [ "$(jq -er '.channel' release/latest.json)" = stable ] || {
+            echo 'Release manifest is not promotion-ready' >&2
+            exit 1
+          }
+          release_base="https://github.com/MayorBug/pwm-fan-builds/releases/download/$RELEASE_TAG"
+          package_base="$release_base/"
+          jq -er --arg base "$package_base" '
             [.packages.controller.url, .packages.core.url, .packages.updater.url]
-            | all(startswith($base))' release/latest.json >/dev/null
-          grep -Fq "$base/latest.json" release/install.sh
+            | all(startswith($base))' release/latest.json >/dev/null || {
+            echo 'Package URLs do not point to the selected release' >&2
+            exit 1
+          }
+          grep -Fq "$release_base/latest.json" release/install.sh || {
+            echo 'Installer does not use the selected release manifest' >&2
+            exit 1
+          }
 
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --prerelease=false --latest
