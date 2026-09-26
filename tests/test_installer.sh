@@ -17,10 +17,10 @@ printf 'development core\n' > "$TEST_TMP/files/development-core.apk"
 
 make_manifest()
 {
-	local output="$1" version="$2" release="$3" prefix="$4"
-	python3 - "$output" "$version" "$release" "$prefix" "$TEST_TMP/files" <<'PY'
+	local output="$1" version="$2" release="$3" prefix="$4" channel="${5:-stable}"
+	python3 - "$output" "$version" "$release" "$prefix" "$TEST_TMP/files" "$channel" <<'PY'
 import hashlib, json, pathlib, sys
-output, version, release, prefix, root = sys.argv[1:]
+output, version, release, prefix, root, channel = sys.argv[1:]
 root = pathlib.Path(root)
 packages = {}
 names = {
@@ -38,14 +38,14 @@ for key, name in names.items():
         'size': len(data),
     }
 pathlib.Path(output).write_text(json.dumps({
-    'schema': 1, 'channel': 'stable', 'version': version,
+    'schema': 1, 'channel': channel, 'version': version,
     'release': release, 'packages': packages,
 }))
 PY
 }
 
-make_manifest "$TEST_TMP/stable.json" 0.3.0 1 stable
-make_manifest "$TEST_TMP/self.json" 0.4.0 1 development
+make_manifest "$TEST_TMP/stable.json" 0.3.0 1 stable stable
+make_manifest "$TEST_TMP/self.json" 0.4.0 1 development development
 
 cat > "$TEST_TMP/bin/wget" <<'EOF'
 #!/bin/sh
@@ -58,9 +58,10 @@ while [ "$#" -gt 0 ]; do
 done
 case $url in
 	*/latest/download/latest.json) source=$TEST_STABLE_MANIFEST ;;
-	*/v0.4.0-r1/latest.json) source=$TEST_SELF_MANIFEST ;;
+	*/development/latest.json) source=$TEST_DEVELOPMENT_MANIFEST ;;
 	*/stable-controller.apk) source=$TEST_FILES/stable-controller.apk ;;
 	*/stable-core.apk) source=$TEST_FILES/stable-core.apk ;;
+	*/stable-updater.apk) source=$TEST_FILES/stable-updater.apk ;;
 	*/development-updater.apk) source=$TEST_FILES/development-updater.apk ;;
 	*/development-controller.apk) source=$TEST_FILES/development-controller.apk ;;
 	*/development-core.apk) source=$TEST_FILES/development-core.apk ;;
@@ -108,32 +109,31 @@ cat > "$TEST_TMP/bin/uci" <<'EOF'
 cat > "$TEST_UCI_LOG"
 EOF
 chmod +x "$TEST_TMP/bin/"*
-sed 's|@SELF_MANIFEST_URL@|https://github.com/MayorBug/pwm-fan-builds/releases/download/v0.4.0-r1/latest.json|' \
-	"$ROOT/install.sh" > "$TEST_TMP/install.sh"
+cp "$ROOT/install.sh" "$TEST_TMP/install.sh"
 chmod +x "$TEST_TMP/install.sh"
 
 PATH=$TEST_TMP/bin:$PATH \
+PWM_FAN_INSTALL_CHANNEL=stable \
 TEST_STABLE_MANIFEST=$TEST_TMP/stable.json \
-TEST_SELF_MANIFEST=$TEST_TMP/self.json \
-TEST_FILES=$TEST_TMP/files TEST_INSTALLED=yes \
-TEST_APK_LOG=$TEST_TMP/apk.log TEST_UCI_LOG=$TEST_TMP/uci.log \
-	"$TEST_TMP/install.sh" >/dev/null
-grep -Fq '/updater.apk' "$TEST_TMP/apk.log"
-if grep -Eq '/(controller|core)[.]apk' "$TEST_TMP/apk.log"; then
-	echo 'development bootstrap replaced installed stable application packages' >&2
-	exit 1
-fi
-grep -Fq "set pwm_fan_updater.main.channel='stable'" "$TEST_TMP/uci.log"
-
-cp "$TEST_TMP/self.json" "$TEST_TMP/stable.json"
-PATH=$TEST_TMP/bin:$PATH \
-TEST_STABLE_MANIFEST=$TEST_TMP/stable.json \
-TEST_SELF_MANIFEST=$TEST_TMP/self.json \
+TEST_DEVELOPMENT_MANIFEST=$TEST_TMP/self.json \
 TEST_FILES=$TEST_TMP/files TEST_INSTALLED=yes \
 TEST_APK_LOG=$TEST_TMP/apk.log TEST_UCI_LOG=$TEST_TMP/uci.log \
 	"$TEST_TMP/install.sh" >/dev/null
 grep -Fq '/controller.apk' "$TEST_TMP/apk.log"
 grep -Fq '/core.apk' "$TEST_TMP/apk.log"
 grep -Fq '/updater.apk' "$TEST_TMP/apk.log"
+grep -Fq "set pwm_fan_updater.main.channel='stable'" "$TEST_TMP/uci.log"
+
+PATH=$TEST_TMP/bin:$PATH \
+PWM_FAN_INSTALL_CHANNEL=development \
+TEST_STABLE_MANIFEST=$TEST_TMP/stable.json \
+TEST_DEVELOPMENT_MANIFEST=$TEST_TMP/self.json \
+TEST_FILES=$TEST_TMP/files TEST_INSTALLED=yes \
+TEST_APK_LOG=$TEST_TMP/apk.log TEST_UCI_LOG=$TEST_TMP/uci.log \
+	"$TEST_TMP/install.sh" >/dev/null
+grep -Fq '/controller.apk' "$TEST_TMP/apk.log"
+grep -Fq '/core.apk' "$TEST_TMP/apk.log"
+grep -Fq '/updater.apk' "$TEST_TMP/apk.log"
+grep -Fq "set pwm_fan_updater.main.channel='development'" "$TEST_TMP/uci.log"
 
 printf 'PWM Fan installer assertions passed.\n'

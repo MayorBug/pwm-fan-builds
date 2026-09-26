@@ -5,7 +5,7 @@ set -eu
 umask 077
 
 STABLE_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/latest.json
-SELF_MANIFEST_URL=@SELF_MANIFEST_URL@
+DEVELOPMENT_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/download/development/latest.json
 RELEASE_PREFIX=https://github.com/MayorBug/pwm-fan-builds/releases/download/
 WORK=
 INSTALL_FILES=
@@ -24,26 +24,6 @@ fail()
 field()
 {
 	jsonfilter -i "$1" -e "$2" 2>/dev/null
-}
-
-package_version()
-{
-	local name="$1" version
-	version=$(apk list --installed "$name" 2>/dev/null |
-		sed -n "1s/^${name}-\\([^ ]*\\).*/\\1/p")
-	printf '%s\n' "$version"
-}
-
-add_if_needed()
-{
-	local name="$1" candidate="$2" file="$3" installed relation
-	installed=$(package_version "$name")
-	if [ -z "$installed" ]; then
-		INSTALL_FILES="$INSTALL_FILES $file"
-		return
-	fi
-	relation=$(apk version -t "$installed" "$candidate" 2>/dev/null || printf unknown)
-	[ "$relation" != '<' ] || INSTALL_FILES="$INSTALL_FILES $file"
 }
 
 fetch_package()
@@ -76,45 +56,37 @@ WORK=$(mktemp -d /tmp/pwm-fan-install.XXXXXX) ||
 df -k /tmp | awk 'NR == 2 { exit ($4 < 2048) }' ||
 	fail 'at least 2 MiB of free temporary space is required'
 
-wget -T 20 -O "$WORK/stable.json" "$STABLE_MANIFEST_URL" ||
-	fail 'could not download stable release information'
-wget -T 20 -O "$WORK/self.json" "$SELF_MANIFEST_URL" ||
-	fail 'could not download build information'
-[ "$(field "$WORK/stable.json" '@.channel')" = stable ] ||
-	fail 'stable release information is invalid'
-[ "$(field "$WORK/self.json" '@.channel')" = stable ] ||
-	fail 'build information is invalid'
-
-stable_version=$(field "$WORK/stable.json" '@.version')
-stable_release=$(field "$WORK/stable.json" '@.release')
-self_version=$(field "$WORK/self.json" '@.version')
-self_release=$(field "$WORK/self.json" '@.release')
-stable_id=$stable_version-r$stable_release
-self_id=$self_version-r$self_release
-
-if [ "$stable_id" = "$self_id" ]; then
-	fetch_package "$WORK/self.json" controller "$WORK/controller.apk"
-	fetch_package "$WORK/self.json" core "$WORK/core.apk"
-	INSTALL_FILES="$WORK/controller.apk $WORK/core.apk"
-else
-	fetch_package "$WORK/stable.json" controller "$WORK/controller.apk"
-	fetch_package "$WORK/stable.json" core "$WORK/core.apk"
-	controller_version=$(field "$WORK/stable.json" '@.packages.controller.version')-r$(field "$WORK/stable.json" '@.packages.controller.release')
-	core_version=$(field "$WORK/stable.json" '@.packages.core.version')-r$(field "$WORK/stable.json" '@.packages.core.release')
-	add_if_needed pwm-fan-control "$controller_version" "$WORK/controller.apk"
-	add_if_needed luci-app-pwm-fan "$core_version" "$WORK/core.apk"
+install_channel=${PWM_FAN_INSTALL_CHANNEL:-}
+if [ -z "$install_channel" ]; then
+	choice=
+	if printf '%s' 'Install Stable or Development? [S/d]: ' > /dev/tty 2>/dev/null; then
+		IFS= read -r choice < /dev/tty || choice=
+	fi
+	case $choice in d|D|dev|Dev|development|Development|2) install_channel=development ;; *) install_channel=stable ;; esac
 fi
+case $install_channel in
+	stable) manifest_url=$STABLE_MANIFEST_URL; channel_label=Stable ;;
+	development) manifest_url=$DEVELOPMENT_MANIFEST_URL; channel_label=Development ;;
+	*) fail 'PWM_FAN_INSTALL_CHANNEL must be stable or development' ;;
+esac
 
-fetch_package "$WORK/self.json" updater "$WORK/updater.apk"
-INSTALL_FILES="$INSTALL_FILES $WORK/updater.apk"
+wget -T 20 -O "$WORK/selected.json" "$manifest_url" ||
+	fail "could not download $install_channel release information"
+[ "$(field "$WORK/selected.json" '@.channel')" = "$install_channel" ] ||
+	fail "$install_channel release information is invalid"
+
+fetch_package "$WORK/selected.json" controller "$WORK/controller.apk"
+fetch_package "$WORK/selected.json" core "$WORK/core.apk"
+fetch_package "$WORK/selected.json" updater "$WORK/updater.apk"
+INSTALL_FILES="$WORK/controller.apk $WORK/core.apk $WORK/updater.apk"
 # The file names contain no shell metacharacters or spaces.
 # shellcheck disable=SC2086
 apk add --allow-untrusted $INSTALL_FILES || fail 'APK installation failed'
 
-uci -q batch <<-'EOF' || fail 'could not save the stable update channel'
+uci -q batch <<-EOF || fail "could not save the $install_channel update channel"
 	set pwm_fan_updater.main=updater
-	set pwm_fan_updater.main.channel='stable'
+	set pwm_fan_updater.main.channel='$install_channel'
 	commit pwm_fan_updater
 EOF
 
-printf '%s\n' 'PWM Fan packages installed successfully. The update channel is Stable.'
+printf 'PWM Fan packages installed successfully. The update channel is %s.\n' "$channel_label"

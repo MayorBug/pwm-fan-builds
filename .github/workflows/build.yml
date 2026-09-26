@@ -87,13 +87,18 @@ jobs:
               exit 1
           fi
 
+          case "$GITHUB_REF_NAME" in
+            main) release_channel=stable; tag_prefix="v${frontend_version}" ;;
+            dev) release_channel=development; tag_prefix="v${frontend_version}-dev" ;;
+            *) echo "Builds are allowed only from main or dev, not $GITHUB_REF_NAME" >&2; exit 1 ;;
+          esac
           existing_releases=$(gh api --paginate \
             "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq '.[].tag_name')
           highest_release=0
           for tag in $existing_releases; do
             case $tag in
-              "v${frontend_version}-r"*)
+              "${tag_prefix}-r"*)
                 candidate=${tag##*-r}
                 if valid_release "$candidate" && [ "$candidate" -gt "$highest_release" ]; then
                   highest_release=$candidate
@@ -105,8 +110,8 @@ jobs:
           if [ "$highest_release" -ge "$build_release" ]; then
             build_release=$((highest_release + 1))
           fi
-          release_tag="v${frontend_version}-r${build_release}"
-          echo "Selected release: $release_tag"
+          release_tag="${tag_prefix}-r${build_release}"
+          echo "Selected $release_channel release: $release_tag"
 
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$build_release/" "$app_makefile"
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$build_release/" "$controller_makefile"
@@ -117,6 +122,7 @@ jobs:
             "FRONTEND_RELEASE=$build_release" \
             "CONTROLLER_VERSION=$controller_version" \
             "CONTROLLER_RELEASE=$build_release" \
+            "RELEASE_CHANNEL=$release_channel" \
             "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
 
       - name: Prepare feeds and packages
@@ -362,6 +368,7 @@ jobs:
           jq -n \
             --arg version "$FRONTEND_VERSION" \
             --arg release "$FRONTEND_RELEASE" \
+            --arg channel "$RELEASE_CHANNEL" \
             --arg published_at "$(date -u +%FT%TZ)" \
             --arg source_repo "$LUCI_REPOSITORY" \
             --arg source_ref "$LUCI_BRANCH" \
@@ -385,7 +392,7 @@ jobs:
             --arg updater_url "$base/luci-app-pwm-fan-updater.apk" \
             --arg updater_sha "$updater_sha" \
             --argjson updater_size "$updater_size" \
-            '{schema:1, channel:"stable", version:$version, release:$release,
+            '{schema:1, channel:$channel, version:$version, release:$release,
               published_at:$published_at,
               source:{repository:$source_repo, ref:$source_ref, commit:$source_commit},
               controller_source:{repository:$controller_repo, ref:$controller_ref,
@@ -402,8 +409,7 @@ jobs:
                 updater:{version:$version, release:$release,
                   url:$updater_url, sha256:$updater_sha, size:$updater_size}
               }}' > release/latest.json
-          sed "s|@SELF_MANIFEST_URL@|$base/latest.json|g" \
-            delivery/install.sh > release/install.sh
+          cp delivery/install.sh release/install.sh
           chmod 0755 release/install.sh
 
       - name: Upload release artifacts
@@ -430,26 +436,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          release_tag="v$(jq -r '.version' release/latest.json)-r$(jq -r '.release' release/latest.json)"
+          version=$(jq -r '.version' release/latest.json)
+          release=$(jq -r '.release' release/latest.json)
+          channel=$(jq -r '.channel' release/latest.json)
+          case "$channel" in
+            stable) release_tag="v${version}-r${release}" ;;
+            development) release_tag="v${version}-dev-r${release}" ;;
+            *) echo "Invalid release channel: $channel" >&2; exit 1 ;;
+          esac
           gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" \
             >/dev/null 2>&1 && {
               echo "Release already exists: $release_tag" >&2
               exit 1
             }
-          gh release create "$release_tag" release/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "LuCI PWM Fan Builds ${release_tag#v}" \
-            --notes "PWM Fan APK build from LuCI commit $(jq -r '.source.commit' release/latest.json) and controller commit $(jq -r '.controller_source.commit' release/latest.json)." \
-            --prerelease
-
-          mkdir development
-          jq '.channel = "development"' release/latest.json > development/latest.json
-          if ! gh release view development --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create development \
+          if [ "$channel" = stable ]; then
+            gh release create "$release_tag" release/* \
               --repo "$GITHUB_REPOSITORY" \
-              --title "PWM Fan development channel" \
-              --notes "This prerelease contains the manifest for the newest development build." \
+              --title "LuCI PWM Fan Builds ${release_tag#v}" \
+              --notes "Stable PWM Fan APK build from LuCI commit $(jq -r '.source.commit' release/latest.json) and controller commit $(jq -r '.controller_source.commit' release/latest.json)." \
+              --latest
+          else
+            gh release create "$release_tag" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "LuCI PWM Fan Development ${release_tag#v}" \
+              --notes "Development PWM Fan APK build from LuCI commit $(jq -r '.source.commit' release/latest.json) and controller commit $(jq -r '.controller_source.commit' release/latest.json)." \
               --prerelease
+            if ! gh release view development --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release create development \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "PWM Fan development channel" \
+                --notes "This prerelease contains the manifest for the newest development build." \
+                --prerelease
+            fi
+            gh release upload development release/latest.json \
+              --repo "$GITHUB_REPOSITORY" --clobber
           fi
-          gh release upload development development/latest.json \
-            --repo "$GITHUB_REPOSITORY" --clobber

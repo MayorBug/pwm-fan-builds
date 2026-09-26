@@ -158,10 +158,13 @@ if grep -Eq 'wget[[:space:]]+-q' "$ROOT/install.sh"; then
 	echo 'installer still suppresses wget download progress' >&2
 	exit 1
 fi
-grep -Fq 'SELF_MANIFEST_URL=@SELF_MANIFEST_URL@' "$ROOT/install.sh"
-grep -Fq 'add_if_needed pwm-fan-control' "$ROOT/install.sh"
-grep -Fq 'add_if_needed luci-app-pwm-fan' "$ROOT/install.sh"
-grep -Fq 'fetch_package "$WORK/self.json" updater' "$ROOT/install.sh"
-grep -Fq "set pwm_fan_updater.main.channel='stable'" "$ROOT/install.sh"
+grep -Fq 'STABLE_MANIFEST_URL=' "$ROOT/install.sh"
+grep -Fq 'DEVELOPMENT_MANIFEST_URL=' "$ROOT/install.sh"
+grep -Fq 'Install Stable or Development? [S/d]:' "$ROOT/install.sh"
+grep -Fq 'PWM_FAN_INSTALL_CHANNEL' "$ROOT/install.sh"
+grep -Fq 'fetch_package "$WORK/selected.json" controller' "$ROOT/install.sh"
+grep -Fq 'fetch_package "$WORK/selected.json" core' "$ROOT/install.sh"
+grep -Fq 'fetch_package "$WORK/selected.json" updater' "$ROOT/install.sh"
+grep -Fq "set pwm_fan_updater.main.channel='\$install_channel'" "$ROOT/install.sh"
 
 printf 'PWM Fan updater assertions passed.\n'

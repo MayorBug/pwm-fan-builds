@@ -5,7 +5,6 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 WORKFLOW=$ROOT/.github/workflows/build.yml
-PROMOTE=$ROOT/.github/workflows/promote.yml
 
 grep -Fq 'PACKAGES_REPOSITORY: https://github.com/MayorBug/packages' "$WORKFLOW"
 grep -Fq 'PACKAGES_BRANCH: pwm-fan-control' "$WORKFLOW"
@@ -48,26 +47,20 @@ grep -Fq 'uses: actions/upload-artifact@v7' "$WORKFLOW"
 grep -Fq 'uses: actions/download-artifact@v8' "$WORKFLOW"
 grep -Fq 'persist-credentials: false' "$WORKFLOW"
 grep -Fq 'delivery/tests/run_tests.sh' "$WORKFLOW"
+grep -Fq 'main) release_channel=stable' "$WORKFLOW"
+grep -Fq 'dev) release_channel=development' "$WORKFLOW"
+grep -Fq 'Builds are allowed only from main or dev' "$WORKFLOW"
+grep -Fq 'release_tag="${tag_prefix}-r${build_release}"' "$WORKFLOW"
+grep -Fq 'stable) release_tag="v${version}-r${release}"' "$WORKFLOW"
+grep -Fq 'development) release_tag="v${version}-dev-r${release}"' "$WORKFLOW"
+grep -Fq -- '--latest' "$WORKFLOW"
 grep -Fq -- '--prerelease' "$WORKFLOW"
-grep -Fq 'gh release upload development development/latest.json' "$WORKFLOW"
-grep -Fq "jq '.channel = \"development\"'" "$WORKFLOW"
-grep -Fq 'sed "s|@SELF_MANIFEST_URL@|$base/latest.json|g"' "$WORKFLOW"
-if sed -n '/gh release create "$release_tag"/,/^$/p' "$WORKFLOW" |
-	grep -Fq -- '--latest'; then
-	echo 'development build is marked as latest' >&2
-	exit 1
-fi
-
-grep -Fq 'release_tag:' "$PROMOTE"
-grep -Fq 'gh release download "$RELEASE_TAG"' "$PROMOTE"
-grep -Fq 'sha256sum -c sha256sums' "$PROMOTE"
-grep -Fq 'Release is not a prerelease' "$PROMOTE"
-grep -Fq -- '--prerelease=false --latest' "$PROMOTE"
-grep -Fq 'grep -Fq "$release_base/latest.json" release/install.sh' "$PROMOTE"
-if grep -Eq '(^|[[:space:]])make([[:space:]]|$)|actions/checkout' "$PROMOTE"; then
-	echo 'promotion workflow rebuilds or checks out source' >&2
-	exit 1
-fi
+grep -Fq 'gh release upload development release/latest.json' "$WORKFLOW"
+grep -Fq 'if [ "$channel" = stable ]' "$WORKFLOW"
+grep -Fq 'cp delivery/install.sh release/install.sh' "$WORKFLOW"
+grep -Fq 'DEVELOPMENT_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/download/development/latest.json' "$ROOT/install.sh"
+grep -Fq "PWM_FAN_INSTALL_CHANNEL" "$ROOT/install.sh"
+[ ! -e "$ROOT/.github/workflows/promote.yml" ]
 
 grep -A3 -F 'restore-keys: |' "$WORKFLOW" |
 	grep -Fq 'pwm-fan-generated-v2-${{ runner.os }}-'
