@@ -11,7 +11,6 @@ HTTP_CLIENT=${PWM_FAN_UPDATE_HTTP_CLIENT:-uclient-fetch}
 JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
 APK=${PWM_FAN_UPDATE_APK:-apk}
 UCI=${PWM_FAN_UPDATE_UCI:-uci}
-INIT=${PWM_FAN_UPDATE_INIT:-/etc/init.d/pwm-fan-control}
 WORK=
 LOCK=/tmp/pwm-fan-update.lock
 STATUS=${PWM_FAN_UPDATE_STATUS:-/tmp/pwm-fan-update-status.json}
@@ -272,7 +271,6 @@ fetch_package()
 
 run_update()
 {
-	local controller_running=false
 	ASYNC=true
 	LOCK_HELD=true
 	trap cleanup EXIT INT TERM
@@ -290,15 +288,9 @@ run_update()
 	STATUS_DOWNLOADED=0
 	STATUS_TOTAL=0
 	status_write true null "$STATUS_PHASE" '' 0 0 3 ''
-	if [ -x "$INIT" ] && "$INIT" running >/dev/null 2>&1; then
-		controller_running=true
-	fi
 	"$APK" add --allow-untrusted --force-reinstall "$WORK/controller.apk" "$WORK/core.apk" \
 		"$WORK/updater.apk" >/dev/null ||
 		json_error install_failed
-	if [ "$controller_running" = true ]; then
-		"$INIT" restart >/dev/null 2>&1 || json_error controller_restart_failed
-	fi
 	status_write false true complete '' 0 0 3 ''
 }
 

@@ -7,10 +7,8 @@ umask 077
 STABLE_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/latest.json
 DEVELOPMENT_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/download/development/latest.json
 RELEASE_PREFIX=https://github.com/MayorBug/pwm-fan-builds/releases/download/
-INIT=${PWM_FAN_INSTALL_INIT:-/etc/init.d/pwm-fan-control}
 WORK=
 INSTALL_FILES=
-CONTROLLER_RUNNING=false
 
 cleanup()
 {
@@ -107,15 +105,9 @@ fetch_package "$WORK/selected.json" controller "$WORK/controller.apk"
 fetch_package "$WORK/selected.json" core "$WORK/core.apk"
 fetch_package "$WORK/selected.json" updater "$WORK/updater.apk"
 INSTALL_FILES="$WORK/controller.apk $WORK/core.apk $WORK/updater.apk"
-if [ -x "$INIT" ] && "$INIT" running >/dev/null 2>&1; then
-	CONTROLLER_RUNNING=true
-fi
 # The file names contain no shell metacharacters or spaces.
 # shellcheck disable=SC2086
 apk add --allow-untrusted $INSTALL_FILES || fail 'APK installation failed'
-if [ "$CONTROLLER_RUNNING" = true ]; then
-	"$INIT" restart >/dev/null 2>&1 || fail 'controller restart failed after installation'
-fi
 
 uci -q batch <<-EOF || fail "could not save the $install_channel update channel"
 	set pwm_fan_updater.main=updater

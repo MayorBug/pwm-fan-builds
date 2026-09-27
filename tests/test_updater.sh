@@ -109,7 +109,6 @@ fi
 grep -Fq 'manifest_version_mismatch' "$TEST_TMP/mismatch.json"
 
 grep -Fq -- '--force-reinstall' "$UPDATER"
-grep -Fq 'controller_restart_failed' "$UPDATER"
 grep -Fq 'installed_version luci-app-pwm-fan' "$UPDATER"
 grep -Fq 'installed_version pwm-fan-control' "$UPDATER"
 grep -Fq 'installed_version luci-app-pwm-fan-updater' "$UPDATER"
