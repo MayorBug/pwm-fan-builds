@@ -5,6 +5,13 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 WORKFLOW=$ROOT/.github/workflows/build.yml
+README=$ROOT/README.md
+
+grep -Fq 'releases/download/development/install.sh' "$README"
+if grep -Fq 'releases/latest/download/install.sh | env PWM_FAN_INSTALL_CHANNEL=development' "$README"; then
+	echo 'Development instructions still bootstrap through the Stable installer' >&2
+	exit 1
+fi
 
 grep -Fq 'PACKAGES_REPOSITORY: https://github.com/MayorBug/packages' "$WORKFLOW"
 grep -Fq 'PACKAGES_BRANCH: pwm-fan-control' "$WORKFLOW"

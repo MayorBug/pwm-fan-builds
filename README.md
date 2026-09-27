@@ -65,16 +65,16 @@ Run on an APK-based OpenWrt router:
 wget -qO- https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/install.sh | sh
 ```
 
-Choose **Stable** or **Development** when prompted. Stable is selected when no
-answer or controlling terminal is available. The installer downloads all three
-packages, verifies their SHA-256 checksums, and saves the selected updater
-channel.
+This URL always bootstraps the current Stable release. The installer downloads
+all three packages, verifies their SHA-256 checksums, and saves the Stable
+updater channel.
 
-For unattended installation:
+To bootstrap the Development release, fetch its installer directly:
 
 ```sh
-wget -qO- https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/install.sh | env PWM_FAN_INSTALL_CHANNEL=development sh
+wget -qO- https://github.com/MayorBug/pwm-fan-builds/releases/download/development/install.sh | env PWM_FAN_INSTALL_CHANNEL=development sh
 ```
 
-Use `PWM_FAN_INSTALL_CHANNEL=stable` for unattended Stable installation. The
+Do not use the Stable `releases/latest` installer to select Development: an
+older Stable installer may not understand the newer channel override. The
 channel can also be changed later from the LuCI Update page.
