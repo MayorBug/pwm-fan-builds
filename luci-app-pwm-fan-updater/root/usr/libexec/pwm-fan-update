@@ -11,6 +11,7 @@ HTTP_CLIENT=${PWM_FAN_UPDATE_HTTP_CLIENT:-uclient-fetch}
 JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
 APK=${PWM_FAN_UPDATE_APK:-apk}
 UCI=${PWM_FAN_UPDATE_UCI:-uci}
+INIT=${PWM_FAN_UPDATE_INIT:-/etc/init.d/pwm-fan-control}
 WORK=
 LOCK=/tmp/pwm-fan-update.lock
 STATUS=${PWM_FAN_UPDATE_STATUS:-/tmp/pwm-fan-update-status.json}
@@ -96,6 +97,11 @@ valid_version()
 	case $1 in ''|*[!0-9A-Za-z.+_-]*) return 1 ;; *) return 0 ;; esac
 }
 
+valid_release()
+{
+	case $1 in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
+
 valid_url()
 {
 	case $1 in "$RELEASE_PREFIX"*) return 0 ;; *) return 1 ;; esac
@@ -128,6 +134,12 @@ load_manifest()
 	SOURCE_COMMIT=$(field '@.source.commit') || json_error manifest_invalid
 	CONTROLLER_SOURCE_COMMIT=$(field '@.controller_source.commit') ||
 		json_error manifest_invalid
+	CONTROLLER_VERSION=$(field '@.packages.controller.version') || json_error manifest_invalid
+	CONTROLLER_RELEASE=$(field '@.packages.controller.release') || json_error manifest_invalid
+	CORE_VERSION=$(field '@.packages.core.version') || json_error manifest_invalid
+	CORE_RELEASE=$(field '@.packages.core.release') || json_error manifest_invalid
+	UPDATER_VERSION=$(field '@.packages.updater.version') || json_error manifest_invalid
+	UPDATER_RELEASE=$(field '@.packages.updater.release') || json_error manifest_invalid
 	CONTROLLER_URL=$(field '@.packages.controller.url') || json_error manifest_invalid
 	CONTROLLER_SHA=$(field '@.packages.controller.sha256') || json_error manifest_invalid
 	CONTROLLER_SIZE=$(field '@.packages.controller.size') || json_error manifest_invalid
@@ -140,8 +152,15 @@ load_manifest()
 
 	[ "$SCHEMA" = 1 ] && [ "$CHANNEL" = "$SELECTED_CHANNEL" ] ||
 		json_error manifest_invalid
-	valid_version "$VERSION" && valid_version "$RELEASE" ||
+	valid_version "$VERSION" && valid_release "$RELEASE" &&
+		valid_version "$CONTROLLER_VERSION" && valid_release "$CONTROLLER_RELEASE" &&
+		valid_version "$CORE_VERSION" && valid_release "$CORE_RELEASE" &&
+		valid_version "$UPDATER_VERSION" && valid_release "$UPDATER_RELEASE" ||
 		json_error manifest_invalid
+	[ "$CONTROLLER_VERSION" = "$VERSION" ] && [ "$CONTROLLER_RELEASE" = "$RELEASE" ] &&
+		[ "$CORE_VERSION" = "$VERSION" ] && [ "$CORE_RELEASE" = "$RELEASE" ] &&
+		[ "$UPDATER_VERSION" = "$VERSION" ] && [ "$UPDATER_RELEASE" = "$RELEASE" ] ||
+		json_error manifest_version_mismatch
 	valid_url "$CONTROLLER_URL" && valid_url "$CORE_URL" &&
 		valid_url "$UPDATER_URL" ||
 		json_error manifest_origin_rejected
@@ -168,12 +187,12 @@ load_manifest()
 
 installed_version()
 {
-	local version
-	version=$("$APK" list --installed luci-app-pwm-fan 2>/dev/null |
-		sed -n '1s/^luci-app-pwm-fan-\([^ ]*\).*/\1/p')
+	local package=$1 version
+	version=$("$APK" list --installed "$package" 2>/dev/null |
+		sed -n "1s/^${package}-\\([^ ]*\\).*/\\1/p")
 	if [ -z "$version" ]; then
-		version=$("$APK" info -v luci-app-pwm-fan 2>/dev/null |
-			sed -n '1s/^luci-app-pwm-fan-\([^ ]*\).*/\1/p')
+		version=$("$APK" info -v "$package" 2>/dev/null |
+			sed -n "1s/^${package}-\\([^ ]*\\).*/\\1/p")
 	fi
 	printf '%s\n' "$version"
 }
@@ -182,25 +201,32 @@ check_update()
 {
 	local latest relation=unknown update_available=false same_version=false up_to_date=false
 	load_manifest
-	INSTALLED=$(installed_version)
+	INSTALLED=$(installed_version luci-app-pwm-fan)
+	INSTALLED_CONTROLLER=$(installed_version pwm-fan-control)
+	INSTALLED_UPDATER=$(installed_version luci-app-pwm-fan-updater)
 	valid_version "${INSTALLED:-not-installed}" || INSTALLED=unknown
+	valid_version "${INSTALLED_CONTROLLER:-not-installed}" || INSTALLED_CONTROLLER=unknown
+	valid_version "${INSTALLED_UPDATER:-not-installed}" || INSTALLED_UPDATER=unknown
 	latest=$VERSION-r$RELEASE
-	if [ "$INSTALLED" = "$latest" ]; then
-		relation='='; same_version=true; up_to_date=true
-	elif [ "$INSTALLED" = unknown ] || [ "$INSTALLED" = not-installed ] ||
-		[ -z "$INSTALLED" ]; then
-		update_available=true
-	else
+	if [ "$INSTALLED" = "$INSTALLED_CONTROLLER" ] &&
+		[ "$INSTALLED" = "$INSTALLED_UPDATER" ] &&
+		[ "$INSTALLED" != unknown ] && [ -n "$INSTALLED" ]; then
 		relation=$("$APK" version -t "$INSTALLED" "$latest" 2>/dev/null || printf unknown)
 		case $relation in
-			'<') update_available=true ;;
 			'=') same_version=true; up_to_date=true ;;
 			'>') up_to_date=true ;;
-			*) relation=unknown; update_available=true ;;
+			*) update_available=true ;;
 		esac
+	else
+		update_available=true
+		if [ "$INSTALLED" != unknown ] && [ -n "$INSTALLED" ]; then
+			relation=$("$APK" version -t "$INSTALLED" "$latest" 2>/dev/null || printf unknown)
+		fi
 	fi
 	printf '{"success":true,"installed":"%s","version":"%s","release":"%s",' \
 		"${INSTALLED:-not-installed}" "$VERSION" "$RELEASE"
+	printf '"controller_installed":"%s","updater_installed":"%s",' \
+		"${INSTALLED_CONTROLLER:-not-installed}" "${INSTALLED_UPDATER:-not-installed}"
 	printf '"source_commit":"%s","release_notes_url":"%s",' \
 		"$SOURCE_COMMIT" "$NOTES"
 	printf '"controller_source_commit":"%s",' "$CONTROLLER_SOURCE_COMMIT"
@@ -246,6 +272,7 @@ fetch_package()
 
 run_update()
 {
+	local controller_running=false
 	ASYNC=true
 	LOCK_HELD=true
 	trap cleanup EXIT INT TERM
@@ -263,9 +290,15 @@ run_update()
 	STATUS_DOWNLOADED=0
 	STATUS_TOTAL=0
 	status_write true null "$STATUS_PHASE" '' 0 0 3 ''
+	if [ -x "$INIT" ] && "$INIT" running >/dev/null 2>&1; then
+		controller_running=true
+	fi
 	"$APK" add --allow-untrusted --force-reinstall "$WORK/controller.apk" "$WORK/core.apk" \
 		"$WORK/updater.apk" >/dev/null ||
 		json_error install_failed
+	if [ "$controller_running" = true ]; then
+		"$INIT" restart >/dev/null 2>&1 || json_error controller_restart_failed
+	fi
 	status_write false true complete '' 0 0 3 ''
 }
 

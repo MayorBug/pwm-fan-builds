@@ -86,6 +86,10 @@ jobs:
               echo "Invalid source package release" >&2
               exit 1
           fi
+          if [ "$frontend_version" != "$controller_version" ]; then
+            echo "Controller and LuCI versions must match" >&2
+            exit 1
+          fi
 
           case "$GITHUB_REF_NAME" in
             main) release_channel=stable; tag_prefix="v${frontend_version}" ;;

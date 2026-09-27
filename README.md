@@ -33,17 +33,19 @@ A router needs all of the following:
 
 Ascending and electrically inverted monotonic `cooling-levels` are supported.
 If hardware is found but its policy cannot be normalized safely, the kernel
-keeps fan control while the application provides read-only monitoring.
+keeps fan control while the application provides read-only monitoring. Version
+1.1 can also use an optional MediaTek Wi-Fi hwmon temperature in Auto and Curve.
+Controller, LuCI, and updater packages are released and installed as one matched set.
 
 **Tested:**
 
 - WS1610
 - H5000M
 - GL.iNet Beryl 7 (`GL-MT3600BE`)
+- Banana Pi BPI-R3
 
 **Candidates awaiting device validation:**
 
-- Banana Pi BPI-R3
 - GL-MT3000
 - GL-X3000 / GL-XE3000 family
 - GL-AXT1800

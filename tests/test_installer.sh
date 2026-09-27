@@ -104,6 +104,15 @@ case $1 in
 esac
 EOF
 
+cat > "$TEST_TMP/bin/init" <<'EOF'
+#!/bin/sh
+case $1 in
+	running) exit 0 ;;
+	restart) printf 'restart\n' > "$TEST_INIT_LOG" ;;
+	*) exit 1 ;;
+esac
+EOF
+
 cat > "$TEST_TMP/bin/uci" <<'EOF'
 #!/bin/sh
 cat > "$TEST_UCI_LOG"
@@ -118,11 +127,13 @@ TEST_STABLE_MANIFEST=$TEST_TMP/stable.json \
 TEST_DEVELOPMENT_MANIFEST=$TEST_TMP/self.json \
 TEST_FILES=$TEST_TMP/files TEST_INSTALLED=yes \
 TEST_APK_LOG=$TEST_TMP/apk.log TEST_UCI_LOG=$TEST_TMP/uci.log \
+TEST_INIT_LOG=$TEST_TMP/init.log PWM_FAN_INSTALL_INIT=$TEST_TMP/bin/init \
 	"$TEST_TMP/install.sh" >/dev/null
 grep -Fq '/controller.apk' "$TEST_TMP/apk.log"
 grep -Fq '/core.apk' "$TEST_TMP/apk.log"
 grep -Fq '/updater.apk' "$TEST_TMP/apk.log"
 grep -Fq "set pwm_fan_updater.main.channel='stable'" "$TEST_TMP/uci.log"
+grep -Fq restart "$TEST_TMP/init.log"
 
 PATH=$TEST_TMP/bin:$PATH \
 PWM_FAN_INSTALL_CHANNEL=development \
@@ -130,10 +141,26 @@ TEST_STABLE_MANIFEST=$TEST_TMP/stable.json \
 TEST_DEVELOPMENT_MANIFEST=$TEST_TMP/self.json \
 TEST_FILES=$TEST_TMP/files TEST_INSTALLED=yes \
 TEST_APK_LOG=$TEST_TMP/apk.log TEST_UCI_LOG=$TEST_TMP/uci.log \
+TEST_INIT_LOG=$TEST_TMP/init.log PWM_FAN_INSTALL_INIT=$TEST_TMP/bin/init \
 	"$TEST_TMP/install.sh" >/dev/null
 grep -Fq '/controller.apk' "$TEST_TMP/apk.log"
 grep -Fq '/core.apk' "$TEST_TMP/apk.log"
 grep -Fq '/updater.apk' "$TEST_TMP/apk.log"
 grep -Fq "set pwm_fan_updater.main.channel='development'" "$TEST_TMP/uci.log"
+
+python3 - "$TEST_TMP/stable.json" "$TEST_TMP/mismatched.json" <<'PY'
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text())
+value['packages']['controller']['version'] = '0.2.0'
+pathlib.Path(sys.argv[2]).write_text(json.dumps(value))
+PY
+if PATH=$TEST_TMP/bin:$PATH PWM_FAN_INSTALL_CHANNEL=stable \
+	TEST_STABLE_MANIFEST=$TEST_TMP/mismatched.json \
+	TEST_DEVELOPMENT_MANIFEST=$TEST_TMP/self.json TEST_FILES=$TEST_TMP/files \
+	TEST_INSTALLED=yes TEST_APK_LOG=$TEST_TMP/apk.log TEST_UCI_LOG=$TEST_TMP/uci.log \
+	"$TEST_TMP/install.sh" >/dev/null 2>&1; then
+	echo 'installer accepted mismatched package versions' >&2
+	exit 1
+fi
 
 printf 'PWM Fan installer assertions passed.\n'

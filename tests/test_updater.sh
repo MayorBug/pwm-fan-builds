@@ -29,6 +29,9 @@ case $expression in
 	'@.channel') printf '%s\n' "${TEST_MANIFEST_CHANNEL:-stable}" ;;
 	'@.version') printf '2.0.0\n' ;;
 	'@.release') printf '1\n' ;;
+	'@.packages.controller.version') printf '%s\n' "${TEST_CONTROLLER_MANIFEST_VERSION:-2.0.0}" ;;
+	'@.packages.core.version'|'@.packages.updater.version') printf '2.0.0\n' ;;
+	'@.packages.controller.release'|'@.packages.core.release'|'@.packages.updater.release') printf '1\n' ;;
 	'@.release_notes_url') printf 'https://github.com/MayorBug/pwm-fan-builds/releases/tag/v2.0.0-r1\n' ;;
 	'@.source.commit') printf '0123456789abcdef0123456789abcdef01234567\n' ;;
 	'@.controller_source.commit') printf 'fedcba9876543210fedcba9876543210fedcba98\n' ;;
@@ -54,7 +57,14 @@ EOF
 cat > "$TEST_TMP/bin/apk" <<'EOF'
 #!/bin/sh
 case $1 in
-	list) [ -z "${TEST_INSTALLED:-}" ] || printf 'luci-app-pwm-fan-%s x\n' "$TEST_INSTALLED" ;;
+	list)
+		package=$3
+		case $package in
+			luci-app-pwm-fan) version=${TEST_INSTALLED:-} ;;
+			pwm-fan-control) version=${TEST_CONTROLLER_INSTALLED:-${TEST_INSTALLED:-}} ;;
+			luci-app-pwm-fan-updater) version=${TEST_UPDATER_INSTALLED:-${TEST_INSTALLED:-}} ;;
+		esac
+		[ -z "$version" ] || printf '%s-%s x\n' "$package" "$version" ;;
 	info) ;;
 	version) printf '%s\n' "$TEST_RELATION" ;;
 	*) exit 1 ;;
@@ -64,7 +74,8 @@ chmod +x "$TEST_TMP/bin/"*
 
 check_case()
 {
-	TEST_INSTALLED=$1 TEST_RELATION=$2 TEST_CHANNEL=$5 TEST_MANIFEST_CHANNEL=$5 \
+	TEST_INSTALLED=$1 TEST_CONTROLLER_INSTALLED=${6:-$1} \
+	TEST_UPDATER_INSTALLED=${7:-$1} TEST_RELATION=$2 TEST_CHANNEL=$5 TEST_MANIFEST_CHANNEL=$5 \
 	PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch \
 	PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter \
 	PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk \
@@ -85,10 +96,24 @@ check_case 1.9.0-r2 '<' true false stable
 check_case 2.0.0-r1 '=' false true stable
 check_case 2.1.0-r1 '>' false false stable
 check_case 1.9.0-r2 '<' true false development
+check_case 2.0.0-r1 '=' true false stable 1.9.0-r2 2.0.0-r1
+if TEST_CONTROLLER_MANIFEST_VERSION=1.9.0 TEST_INSTALLED=2.0.0-r1 \
+	TEST_RELATION='=' TEST_CHANNEL=stable TEST_MANIFEST_CHANNEL=stable \
+	PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch \
+	PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter \
+	PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
+	"$UPDATER" check > "$TEST_TMP/mismatch.json"; then
+	echo 'updater accepted mismatched manifest package versions' >&2
+	exit 1
+fi
+grep -Fq 'manifest_version_mismatch' "$TEST_TMP/mismatch.json"
 
 grep -Fq -- '--force-reinstall' "$UPDATER"
-grep -Fq 'list --installed luci-app-pwm-fan' "$UPDATER"
-if grep -Fq 'list --installed -q luci-app-pwm-fan' "$UPDATER"; then
+grep -Fq 'controller_restart_failed' "$UPDATER"
+grep -Fq 'installed_version luci-app-pwm-fan' "$UPDATER"
+grep -Fq 'installed_version pwm-fan-control' "$UPDATER"
+grep -Fq 'installed_version luci-app-pwm-fan-updater' "$UPDATER"
+if grep -Fq 'list --installed -q' "$UPDATER"; then
 	echo 'installed version lookup still suppresses package version output' >&2
 	exit 1
 fi

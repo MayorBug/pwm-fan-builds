@@ -9,6 +9,7 @@ WORKFLOW=$ROOT/.github/workflows/build.yml
 grep -Fq 'PACKAGES_REPOSITORY: https://github.com/MayorBug/packages' "$WORKFLOW"
 grep -Fq 'PACKAGES_BRANCH: pwm-fan-control' "$WORKFLOW"
 grep -Fq 'packages-source/utils/pwm-fan-control/Makefile' "$WORKFLOW"
+grep -Fq 'Controller and LuCI versions must match' "$WORKFLOW"
 grep -Fq 'existing_releases=$(gh api --paginate' "$WORKFLOW"
 grep -Fq 'highest_release=0' "$WORKFLOW"
 grep -Fq 'build_release=$((highest_release + 1))' "$WORKFLOW"
