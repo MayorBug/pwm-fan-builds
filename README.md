@@ -3,7 +3,14 @@
 Prebuilt APK packages for PWM fan control on APK-based OpenWrt, with Stable and
 Development update channels.
 
-<img width="2441" height="2084" alt="PWM Fan LuCI interface" src="https://github.com/user-attachments/assets/5f717dd4-5c17-4e7e-b515-7268abfa35d9" />
+## Gallery
+
+Click a screenshot to open the full image. These screenshots show the Development interface.
+
+| Monitoring and history | General settings | Fan curve |
+| --- | --- | --- |
+| [![Fan monitoring and temperature history](docs/images/monitoring.png)](docs/images/monitoring.png) | [![Operating mode and automatic control settings](docs/images/settings.png)](docs/images/settings.png) | [![Fan curve editor and kernel minimum](docs/images/fan-curve.png)](docs/images/fan-curve.png) |
+
 
 ## What it builds
 
@@ -59,22 +66,59 @@ A fan connector alone does not guarantee compatibility.
 
 ## Installation
 
-Run on an APK-based OpenWrt router:
+Connect to your router through SSH as `root`. Run these commands on the router, not on your computer.
+
+Download the Stable installer:
 
 ```sh
-wget -qO- https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/install.sh | sh
+wget -T 30 -O /tmp/pwm-fan-install.sh https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/install.sh
 ```
 
-This URL always bootstraps the current Stable release. The installer downloads
-all three packages, verifies their SHA-256 checksums, and saves the Stable
-updater channel.
-
-To bootstrap the Development release, fetch its installer directly:
+If the download succeeds, run the installer:
 
 ```sh
-wget -qO- https://github.com/MayorBug/pwm-fan-builds/releases/download/development/install.sh | env PWM_FAN_INSTALL_CHANNEL=development sh
+test -s /tmp/pwm-fan-install.sh && PWM_FAN_INSTALL_CHANNEL=stable sh /tmp/pwm-fan-install.sh
 ```
 
-Do not use the Stable `releases/latest` installer to select Development: an
-older Stable installer may not understand the newer channel override. The
-channel can also be changed later from the LuCI Update page.
+The installer supports APK-based OpenWrt only. It downloads all three packages and compares their SHA-256 checksums before installation.
+After installation, reload LuCI and open System → Fan Control.
+
+The Stable link follows GitHub's Latest release selection. Release maintainers must keep Development builds marked as prereleases.
+The selected release must contain a Stable manifest for Stable installation.
+
+### Development
+
+Download the Development installer directly:
+
+```sh
+wget -T 30 -O /tmp/pwm-fan-install.sh https://github.com/MayorBug/pwm-fan-builds/releases/download/development/install.sh
+```
+
+If the download succeeds, select Development explicitly:
+
+```sh
+test -s /tmp/pwm-fan-install.sh && PWM_FAN_INSTALL_CHANNEL=development sh /tmp/pwm-fan-install.sh
+```
+
+The `development` release contains the installer and manifest after the next Development publication with the updated workflow.
+For an older publication without that installer, use `install.sh` from its versioned Development release under [Releases](https://github.com/MayorBug/pwm-fan-builds/releases).
+
+Do not use the Stable installer to select Development. Older Stable installers do not support the channel override.
+You can change the channel later from the LuCI Update page.
+
+### If nothing happens
+
+The former `wget -qO- ... | sh` command hides download errors.
+If the download fails without producing a script, `sh` receives no commands and exits without installer output.
+This symptom does not identify the download failure.
+
+Use the download command above without `-q`. If it fails, copy the complete output when you report the problem.
+Do not run the installer after a failed download. A partial file can remain in `/tmp`.
+
+Include the output of these commands in your report:
+
+```sh
+cat /etc/openwrt_release
+command -v apk
+date -u
+```

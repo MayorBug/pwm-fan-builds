@@ -469,9 +469,9 @@ jobs:
               gh release create development \
                 --repo "$GITHUB_REPOSITORY" \
                 --title "PWM Fan development channel" \
-                --notes "This prerelease contains the manifest for the newest development build." \
+                --notes "This prerelease contains the installer and manifest for the newest development build." \
                 --prerelease
             fi
-            gh release upload development release/latest.json \
+            gh release upload development release/latest.json release/install.sh \
               --repo "$GITHUB_REPOSITORY" --clobber
           fi
