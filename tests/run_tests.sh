@@ -9,3 +9,5 @@ for test in test_builder.sh test_updater.sh test_installer.sh; do
 	printf '==> %s\n' "$test"
 	"$ROOT/$test"
 done
+
+node "$ROOT/test_update_view.js"

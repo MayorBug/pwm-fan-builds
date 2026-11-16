@@ -12,7 +12,8 @@ JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
 APK=${PWM_FAN_UPDATE_APK:-apk}
 UCI=${PWM_FAN_UPDATE_UCI:-uci}
 WORK=
-LOCK=/tmp/pwm-fan-update.lock
+LOCK=${PWM_FAN_UPDATE_LOCK:-/tmp/pwm-fan-update.lock}
+LOCK_OWNER=
 STATUS=${PWM_FAN_UPDATE_STATUS:-/tmp/pwm-fan-update-status.json}
 ASYNC=false
 LOCK_HELD=false
@@ -49,7 +50,9 @@ set_channel()
 cleanup()
 {
 	[ -z "$WORK" ] || rm -rf "$WORK"
-	[ "$LOCK_HELD" = false ] || rmdir "$LOCK" 2>/dev/null || true
+	if [ "$LOCK_HELD" = true ] && rmdir "$LOCK_OWNER" 2>/dev/null; then
+		rmdir "$LOCK" 2>/dev/null || true
+	fi
 }
 
 json_error()
@@ -77,8 +80,55 @@ status_write()
 	mv -f "$tmp" "$STATUS"
 }
 
+# A PID alone is unsafe because Linux reuses it. Pair it with its start time.
+process_identity()
+{
+	local stat
+	stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+	stat=${stat##*) }
+	[ "${stat%% *}" != Z ] || return 1
+	printf '%s\n' "$stat" | awk '{ print $20 }'
+}
+
+recover_lock()
+{
+	local owner token pid started identity owners= found=false modified now recovery
+	[ -d "$LOCK" ] || return 1
+	for owner in "$LOCK"/owner.*; do
+		[ -d "$owner" ] || continue
+		found=true
+		owners="$owners ${owner##*/}"
+		token=${owner##*/owner.}
+		pid=${token%%.*}
+		started=${token#*.}
+		case $pid:$started in *[!0-9:]*|:*|*:) return 1 ;; esac
+		identity=$(process_identity "$pid") || identity=
+		[ -z "$identity" ] || [ "$identity" != "$started" ] || return 1
+	done
+	if [ "$found" = true ]; then
+		for token in $owners; do
+			# Claim only the exact dead owners inspected above.
+			rmdir "$LOCK/$token" 2>/dev/null || return 1
+		done
+	else
+		# Allow an acquiring process time to record its owner. This also
+		# recovers empty locks left by older versions or an interrupted start.
+		modified=$(stat -c %Y "$LOCK" 2>/dev/null) || return 1
+		now=$(date +%s)
+		[ "$((now - modified))" -ge 5 ] || return 1
+	fi
+	identity=$(process_identity "$$") || return 1
+	recovery=$LOCK/owner.$$.$identity
+	mkdir "$recovery" 2>/dev/null || return 1
+	# Keep an owner alive while marking the abandoned generation failed.
+	status_write false false failed '' 0 0 0 update_interrupted
+	rmdir "$recovery" 2>/dev/null || return 1
+	rmdir "$LOCK" 2>/dev/null || return 1
+}
+
 read_status()
 {
+	recover_lock || true
 	if [ -s "$STATUS" ]; then
 		cat "$STATUS"
 	else
@@ -271,7 +321,15 @@ fetch_package()
 
 run_update()
 {
+	local identity attempt=0
 	ASYNC=true
+	identity=$(process_identity "$$") || json_error update_start_failed
+	LOCK_OWNER=$LOCK/owner.$$.$identity
+	while [ ! -d "$LOCK_OWNER" ]; do
+		attempt=$((attempt + 1))
+		[ "$attempt" -lt 50 ] || json_error update_start_failed
+		sleep 0.1
+	done
 	LOCK_HELD=true
 	trap cleanup EXIT INT TERM
 	STATUS_PHASE=manifest
@@ -296,9 +354,24 @@ run_update()
 
 start_update()
 {
-	mkdir "$LOCK" 2>/dev/null || json_error update_in_progress
+	local identity pid worker
+	if ! mkdir "$LOCK" 2>/dev/null; then
+		recover_lock && mkdir "$LOCK" 2>/dev/null || json_error update_in_progress
+	fi
+	identity=$(process_identity "$$") || json_error update_start_failed
+	LOCK_OWNER=$LOCK/owner.$$.$identity
+	mkdir "$LOCK_OWNER" || json_error update_start_failed
+	LOCK_HELD=true
+	trap cleanup EXIT INT TERM
 	status_write true null starting '' 0 0 0 ''
 	"$0" run </dev/null >/dev/null 2>&1 &
+	pid=$!
+	identity=$(process_identity "$pid") || json_error update_start_failed
+	worker=$LOCK/owner.$pid.$identity
+	mkdir "$worker" || json_error update_start_failed
+	# The worker owns the lock before this short-lived launcher exits.
+	rmdir "$LOCK_OWNER"
+	LOCK_HELD=false
 	printf '%s\n' '{"success":true,"started":true}'
 }
 

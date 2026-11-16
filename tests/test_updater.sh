@@ -4,19 +4,28 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-UPDATER=$ROOT/luci-app-pwm-fan-updater/root/usr/libexec/pwm-fan-update
+UPDATER=${PWM_TEST_UPDATER:-$ROOT/luci-app-pwm-fan-updater/root/usr/libexec/pwm-fan-update}
 VIEW=$ROOT/luci-app-pwm-fan-updater/htdocs/luci-static/resources/view/system/pwm-fan/update.js
 RPCD=$ROOT/luci-app-pwm-fan-updater/root/usr/share/rpcd/ucode/pwm.fan.update
 TEST_TMP=$(mktemp -d)
 trap 'rm -rf "$TEST_TMP"' EXIT INT TERM
 mkdir "$TEST_TMP/bin"
+export PWM_FAN_UPDATE_LOCK=$TEST_TMP/lock
 
 cat > "$TEST_TMP/bin/uclient-fetch" <<'EOF'
 #!/bin/sh
 while [ "$#" -gt 0 ]; do
 	case $1 in -O) output=$2; shift 2 ;; *) shift ;; esac
 done
-printf '{}\n' > "$output"
+if [ "${TEST_KILL_UPDATER:-no}" = yes ]; then
+	kill -KILL "$PPID"
+	exit 1
+fi
+if [ "${TEST_VALID_PACKAGE:-no}" = yes ]; then
+	printf '%0100d' 0 > "$output"
+else
+	printf '{}\n' > "$output"
+fi
 EOF
 
 cat > "$TEST_TMP/bin/jsonfilter" <<'EOF'
@@ -39,7 +48,7 @@ case $expression in
 	'@.packages.core.url') printf 'https://github.com/MayorBug/pwm-fan-builds/releases/download/v2.0.0-r1/luci-app-pwm-fan.apk\n' ;;
 	'@.packages.updater.url') printf 'https://github.com/MayorBug/pwm-fan-builds/releases/download/v2.0.0-r1/luci-app-pwm-fan-updater.apk\n' ;;
 	'@.packages.controller.sha256'|'@.packages.core.sha256'|'@.packages.updater.sha256')
-		printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' ;;
+		printf '%s\n' "${TEST_SHA:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" ;;
 	'@.packages.controller.size'|'@.packages.core.size'|'@.packages.updater.size') printf '100\n' ;;
 	*) exit 1 ;;
 esac
@@ -67,6 +76,7 @@ case $1 in
 		[ -z "$version" ] || printf '%s-%s x\n' "$package" "$version" ;;
 	info) ;;
 	version) printf '%s\n' "$TEST_RELATION" ;;
+	add) [ -n "${TEST_APK_LOG:-}" ] && printf '%s\n' "$*" > "$TEST_APK_LOG" ;;
 	*) exit 1 ;;
 esac
 EOF
@@ -177,6 +187,64 @@ assert value['phase'] == 'failed'
 assert value['error'] == 'package_size_mismatch'
 assert value['package'] == 'controller.apk'
 PY
+
+# A successful async update must install all three verified packages.
+export PWM_FAN_UPDATE_STATUS=$status_file
+export PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch
+export PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter
+export PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk
+export PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci
+export TEST_SHA=$(printf '%0100d' 0 | sha256sum | cut -d' ' -f1)
+export TEST_VALID_PACKAGE=yes
+export TEST_APK_LOG=$TEST_TMP/apk.log
+wait_finished()
+{
+	for _attempt in $(seq 1 100); do
+		"$UPDATER" status > "$TEST_TMP/finished.json"
+		grep -Fq '"running":false' "$TEST_TMP/finished.json" && return 0
+		sleep 0.1
+	done
+	cat "$TEST_TMP/finished.json" >&2
+	return 1
+}
+"$UPDATER" install > /dev/null
+wait_finished
+python3 - "$TEST_TMP/finished.json" <<'PYTEST'
+import json, pathlib, sys
+status = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert status['success'] is True and status['phase'] == 'complete', status
+assert status['completed'] == 3
+PYTEST
+grep -Fq -- '--force-reinstall' "$TEST_APK_LOG"
+for package in controller core updater; do
+	grep -Fq "/$package.apk" "$TEST_APK_LOG"
+done
+
+# A killed worker must become a failed operation, then permit another install.
+TEST_KILL_UPDATER=yes "$UPDATER" install > /dev/null
+wait_finished
+grep -Fq '"error":"update_interrupted"' "$TEST_TMP/finished.json"
+"$UPDATER" install > /dev/null
+wait_finished
+grep -Fq '"success":true' "$TEST_TMP/finished.json"
+
+# Reused PIDs must not preserve a stale lock. A live matching identity must.
+mkdir "$PWM_FAN_UPDATE_LOCK"
+mkdir "$PWM_FAN_UPDATE_LOCK/owner.$$.0"
+"$UPDATER" status > "$TEST_TMP/reused-pid.json"
+grep -Fq '"error":"update_interrupted"' "$TEST_TMP/reused-pid.json"
+[ ! -d "$PWM_FAN_UPDATE_LOCK" ]
+stat=$(cat /proc/$$/stat)
+stat=${stat##*) }
+identity=$(printf '%s\n' "$stat" | awk '{print $20}')
+mkdir "$PWM_FAN_UPDATE_LOCK"
+mkdir "$PWM_FAN_UPDATE_LOCK/owner.$$.$identity"
+if "$UPDATER" install > "$TEST_TMP/locked.json"; then
+	echo 'updater accepted an install while a live owner held the lock' >&2
+	exit 1
+fi
+grep -Fq 'update_in_progress' "$TEST_TMP/locked.json"
+rmdir "$PWM_FAN_UPDATE_LOCK/owner.$$.$identity" "$PWM_FAN_UPDATE_LOCK"
 
 if grep -Eq 'wget[[:space:]]+-q' "$ROOT/install.sh"; then
 	echo 'installer still suppresses wget download progress' >&2

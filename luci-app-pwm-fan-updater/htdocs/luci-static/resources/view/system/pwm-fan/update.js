@@ -22,6 +22,11 @@ var callStatus = rpc.declare({
 	method: 'status',
 	expect: { '': { running: false, success: false, phase: 'idle' } }
 });
+var callGetChannel = rpc.declare({
+	object: 'pwm.fan.update',
+	method: 'channel',
+	expect: { '': { success: false } }
+});
 var callSetChannel = rpc.declare({
 	object: 'pwm.fan.update',
 	method: 'set_channel',
@@ -31,6 +36,8 @@ var callSetChannel = rpc.declare({
 
 function errorText(code) {
 	return {
+		update_interrupted: _('The update stopped before it finished. Try again.'),
+		update_start_failed: _('The updater could not start. Try again.'),
 		manifest_download_failed: _('Release information could not be downloaded.'),
 		manifest_invalid: _('Release information is invalid.'),
 		manifest_origin_rejected: _('The release points outside the trusted project repository.'),
@@ -209,11 +216,14 @@ return view.extend({
 	handleReset: null,
 
 	load: function() {
-		return Promise.resolve();
+		return withTimeout(callGetChannel(), 10000);
 	},
 
-	render: function() {
-		var selectedChannel = 'stable';
+	render: function(savedChannel) {
+		if (!savedChannel || !savedChannel.success ||
+			(savedChannel.channel !== 'stable' && savedChannel.channel !== 'development'))
+			throw new Error(errorText('invalid_channel'));
+		var selectedChannel = savedChannel.channel;
 		var refreshGeneration = 0;
 		var channelNote = E('p', { 'class': 'pwm-fan-muted' });
 		var body = E('div', { 'class': 'pwm-fan-field-grid' }, [
@@ -251,6 +261,11 @@ return view.extend({
 			E('option', { 'value': 'stable' }, [ _('Stable') ]),
 			E('option', { 'value': 'development' }, [ _('Development') ])
 		]);
+
+		channel.value = selectedChannel;
+		channelNote.textContent = selectedChannel === 'development'
+			? _('Development builds are for testing and can contain defects.')
+			: _('Stable builds are ready for normal use.');
 
 		function refresh() {
 			var generation = ++refreshGeneration;
