@@ -12,10 +12,10 @@ trap 'rm -rf "$TEST_TMP"' EXIT INT TERM
 mkdir "$TEST_TMP/bin"
 export PWM_FAN_UPDATE_LOCK=$TEST_TMP/lock
 
-cat > "$TEST_TMP/bin/uclient-fetch" <<'EOF'
+cat > "$TEST_TMP/bin/curl" <<'EOF'
 #!/bin/sh
 while [ "$#" -gt 0 ]; do
-	case $1 in -O) output=$2; shift 2 ;; *) shift ;; esac
+	case $1 in -o) output=$2; shift 2 ;; *) shift ;; esac
 done
 if [ "${TEST_KILL_UPDATER:-no}" = yes ]; then
 	kill -KILL "$PPID"
@@ -86,7 +86,7 @@ check_case()
 {
 	TEST_INSTALLED=$1 TEST_CONTROLLER_INSTALLED=${6:-$1} \
 	TEST_UPDATER_INSTALLED=${7:-$1} TEST_RELATION=$2 TEST_CHANNEL=$5 TEST_MANIFEST_CHANNEL=$5 \
-	PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch \
+	PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/curl \
 	PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter \
 	PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk \
 	PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
@@ -109,7 +109,7 @@ check_case 1.9.0-r2 '<' true false development
 check_case 2.0.0-r1 '=' true false stable 1.9.0-r2 2.0.0-r1
 if TEST_CONTROLLER_MANIFEST_VERSION=1.9.0 TEST_INSTALLED=2.0.0-r1 \
 	TEST_RELATION='=' TEST_CHANNEL=stable TEST_MANIFEST_CHANNEL=stable \
-	PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch \
+	PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/curl \
 	PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter \
 	PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
 	"$UPDATER" check > "$TEST_TMP/mismatch.json"; then
@@ -163,7 +163,7 @@ assert value['package_count'] == 3
 PY
 
 PWM_FAN_UPDATE_STATUS=$status_file \
-PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch \
+PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/curl \
 PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter \
 PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk \
 PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci \
@@ -190,7 +190,7 @@ PY
 
 # A successful async update must install all three verified packages.
 export PWM_FAN_UPDATE_STATUS=$status_file
-export PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/uclient-fetch
+export PWM_FAN_UPDATE_HTTP_CLIENT=$TEST_TMP/bin/curl
 export PWM_FAN_UPDATE_JSONFILTER=$TEST_TMP/bin/jsonfilter
 export PWM_FAN_UPDATE_APK=$TEST_TMP/bin/apk
 export PWM_FAN_UPDATE_UCI=$TEST_TMP/bin/uci
@@ -246,10 +246,6 @@ fi
 grep -Fq 'update_in_progress' "$TEST_TMP/locked.json"
 rmdir "$PWM_FAN_UPDATE_LOCK/owner.$$.$identity" "$PWM_FAN_UPDATE_LOCK"
 
-if grep -Eq 'wget[[:space:]]+-q' "$ROOT/install.sh"; then
-	echo 'installer still suppresses wget download progress' >&2
-	exit 1
-fi
 grep -Fq 'STABLE_MANIFEST_URL=' "$ROOT/install.sh"
 grep -Fq 'DEVELOPMENT_MANIFEST_URL=' "$ROOT/install.sh"
 grep -Fq 'Install Stable or Development? [S/d]:' "$ROOT/install.sh"

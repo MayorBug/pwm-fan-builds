@@ -7,7 +7,7 @@ umask 077
 STABLE_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/latest.json
 DEVELOPMENT_MANIFEST_URL=https://github.com/MayorBug/pwm-fan-builds/releases/download/development/latest.json
 RELEASE_PREFIX=https://github.com/MayorBug/pwm-fan-builds/releases/download/
-HTTP_CLIENT=${PWM_FAN_UPDATE_HTTP_CLIENT:-uclient-fetch}
+HTTP_CLIENT=${PWM_FAN_UPDATE_HTTP_CLIENT:-curl}
 JSONFILTER=${PWM_FAN_UPDATE_JSONFILTER:-jsonfilter}
 APK=${PWM_FAN_UPDATE_APK:-apk}
 UCI=${PWM_FAN_UPDATE_UCI:-uci}
@@ -172,7 +172,7 @@ load_manifest()
 	esac
 	WORK=$(mktemp -d /tmp/pwm-fan-update.XXXXXX) ||
 		json_error temporary_directory_failed
-	"$HTTP_CLIENT" -q -T 20 -O "$WORK/latest.json" "$manifest_url" ||
+	"$HTTP_CLIENT" -q --fail --silent --show-error --location --proto '=https' --connect-timeout 20 --max-time 90 -o "$WORK/latest.json" "$manifest_url" ||
 		json_error manifest_download_failed
 
 	SCHEMA=$(field '@.schema') || json_error manifest_invalid
@@ -295,7 +295,7 @@ fetch_package()
 	STATUS_TOTAL=$size
 	status_write true null "$STATUS_PHASE" "$name" 0 "$size" \
 		"$STATUS_COMPLETED" ''
-	"$HTTP_CLIENT" -q -T 30 -O "$WORK/$name" "$url" &
+	"$HTTP_CLIENT" -q --fail --silent --show-error --location --proto '=https' --connect-timeout 30 --max-time 90 -o "$WORK/$name" "$url" &
 	pid=$!
 	while kill -0 "$pid" 2>/dev/null; do
 		downloaded=$(wc -c < "$WORK/$name" 2>/dev/null || printf 0)

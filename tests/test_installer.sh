@@ -47,12 +47,13 @@ PY
 make_manifest "$TEST_TMP/stable.json" 0.3.0 1 stable stable
 make_manifest "$TEST_TMP/self.json" 0.4.0 1 development development
 
-cat > "$TEST_TMP/bin/wget" <<'EOF'
+cat > "$TEST_TMP/bin/curl" <<'EOF'
 #!/bin/sh
 while [ "$#" -gt 0 ]; do
 	case $1 in
-		-O) output=$2; shift 2 ;;
-		-T) shift 2 ;;
+		-o) output=$2; shift 2 ;;
+		--proto|--connect-timeout|--max-time) shift 2 ;;
+		-*) shift ;;
 		*) url=$1; shift ;;
 	esac
 done

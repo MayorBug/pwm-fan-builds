@@ -63,7 +63,7 @@ fetch_package()
 	esac
 	case $sha in *[!0-9a-f]*) fail 'release checksum is invalid' ;; esac
 	case $size in ''|*[!0-9]*) fail 'release size is invalid' ;; esac
-	wget -T 20 -O "$output" "$url" || fail "could not download $(basename "$output")"
+	curl -q --fail --location --proto '=https' --connect-timeout 20 --max-time 60 -o "$output" "$url" || fail "could not download $(basename "$output")"
 	[ "$(wc -c < "$output")" -eq "$size" ] || fail 'download size verification failed'
 	printf '%s  %s\n' "$sha" "$output" | sha256sum -c - ||
 		fail 'download checksum verification failed'
@@ -71,7 +71,7 @@ fetch_package()
 
 trap cleanup EXIT INT TERM
 command -v apk >/dev/null 2>&1 || fail 'this installer supports APK-based OpenWrt only'
-command -v wget >/dev/null 2>&1 || fail 'wget is required'
+command -v curl >/dev/null 2>&1 || fail 'curl is required. Run: apk add curl'
 command -v jsonfilter >/dev/null 2>&1 || fail 'jsonfilter is required'
 command -v sha256sum >/dev/null 2>&1 || fail 'sha256sum is required'
 
@@ -94,7 +94,7 @@ case $install_channel in
 	*) fail 'PWM_FAN_INSTALL_CHANNEL must be stable or development' ;;
 esac
 
-wget -T 20 -O "$WORK/selected.json" "$manifest_url" ||
+curl -q --fail --location --proto '=https' --connect-timeout 20 --max-time 60 -o "$WORK/selected.json" "$manifest_url" ||
 	fail "could not download $install_channel release information"
 [ "$(field "$WORK/selected.json" '@.channel')" = "$install_channel" ] ||
 	fail "$install_channel release information is invalid"

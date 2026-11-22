@@ -15,7 +15,7 @@ define Package/luci-app-pwm-fan-updater
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=Updater for LuCI PWM Fan Builds
-  DEPENDS:=+luci-base +rpcd-mod-ucode +uclient-fetch +jsonfilter +luci-app-pwm-fan
+  DEPENDS:=+luci-base +rpcd-mod-ucode +curl +jsonfilter +luci-app-pwm-fan
   PKGARCH:=all
 endef
 
