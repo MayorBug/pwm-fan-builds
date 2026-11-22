@@ -66,12 +66,8 @@ A fan connector alone does not guarantee compatibility.
 
 ## Installation
 
-The Stable installer and updater require `curl`. If it is missing, run `apk add curl` on your router first.
-This change addresses a GitHub download failure seen with OpenWrt's `wget` (`uclient-fetch`):
-```text
-Connection error: Connection timed out
-```
-After the Stable build is published, run this command on your router through SSH:
+The installer and updater requires `curl`. If it is missing, run `apk add curl` on your router first.
+Run this command on your router through SSH:
 ```sh
 curl -fsSL --connect-timeout 30 --max-time 60 -o /tmp/pwm-fan-install.sh https://github.com/MayorBug/pwm-fan-builds/releases/latest/download/install.sh && PWM_FAN_INSTALL_CHANNEL=stable sh /tmp/pwm-fan-install.sh
 ```
