@@ -7,7 +7,7 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 WORKFLOW=$ROOT/.github/workflows/build.yml
 README=$ROOT/README.md
 
-grep -Fq 'releases/download/development/install.sh && PWM_FAN_INSTALL_CHANNEL=development sh /tmp/pwm-fan-install.sh' "$README"
+grep -Fq 'releases/latest/download/install.sh && PWM_FAN_INSTALL_CHANNEL=stable sh /tmp/pwm-fan-install.sh' "$README"
 
 grep -Fq 'PACKAGES_REPOSITORY: https://github.com/MayorBug/packages' "$WORKFLOW"
 grep -Fq 'PACKAGES_BRANCH: pwm-fan-control' "$WORKFLOW"
